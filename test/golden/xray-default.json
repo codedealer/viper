@@ -1,0 +1,70 @@
+{
+  "log": {
+    "access": "/var/log/xray/access.log",
+    "error": "/var/log/xray/error.log",
+    "loglevel": "warning"
+  },
+  "api": {
+    "tag": "api",
+    "listen": "127.0.0.1:10085",
+    "services": [
+      "StatsService"
+    ]
+  },
+  "inbounds": [
+    {
+      "listen": "0.0.0.0",
+      "port": 443,
+      "protocol": "vless",
+      "tag": "vless-in",
+      "settings": {
+        "clients": [
+          {
+            "id": "123e4567-e89b-42d3-a456-426614174000",
+            "email": "default",
+            "flow": "xtls-rprx-vision",
+            "limitIp": 2
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "dest": "127.0.0.1:8443",
+          "privateKey": "KE9dFWwBEA5xCSZV0Efu-m7RdHZEPFQhpY4ka_HmiHA",
+          "serverNames": [
+            "vpn.example.com"
+          ],
+          "shortIds": [
+            "0123456789abcdef"
+          ],
+          "show": false,
+          "maxTimeDiff": 0,
+          "fingerprint": "chrome",
+          "xver": 0
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "freedom",
+      "tag": "direct"
+    },
+    {
+      "protocol": "blackhole",
+      "tag": "block"
+    }
+  ],
+  "dns": {},
+  "stats": {},
+  "sniffing": {
+    "enabled": true,
+    "destOverride": [
+      "http",
+      "tls"
+    ]
+  }
+}

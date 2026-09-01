@@ -1,0 +1,3 @@
+vless://123e4567-e89b-42d3-a456-426614174000@vpn.example.com:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=vpn.example.com&fp=chrome&pbk=RRaBqa-l0ks8eBBQsFhxYUL6jPKwKXBtvVlflQqyaD0&sid=0123456789abcdef&type=tcp&headerType=none#default
+vless://00000000-0000-4000-8000-000000000000@vpn.example.com:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=vpn.example.com&fp=chrome&pbk=RRaBqa-l0ks8eBBQsFhxYUL6jPKwKXBtvVlflQqyaD0&sid=0123456789abcdef&type=tcp&headerType=none#phone
+vless://f47ac10b-58cc-4372-a567-0e02b2c3d479@vpn.example.com:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=vpn.example.com&fp=chrome&pbk=RRaBqa-l0ks8eBBQsFhxYUL6jPKwKXBtvVlflQqyaD0&sid=0123456789abcdef&type=tcp&headerType=none#work

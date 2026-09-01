@@ -1,0 +1,1 @@
+vless://123e4567-e89b-42d3-a456-426614174000@vpn.example.com:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=vpn.example.com&fp=chrome&pbk=RRaBqa-l0ks8eBBQsFhxYUL6jPKwKXBtvVlflQqyaD0&sid=0123456789abcdef&type=tcp&headerType=none#default

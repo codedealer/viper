@@ -1,0 +1,34 @@
+{
+  "name": "viper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Config file generator and remote command executor via SSH",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@11.24.0",
+  "scripts": {
+    "viper": "tsx src/cli.ts",
+    "dev": "tsx src/cli.ts",
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "vite build",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "ink": "^7.1.1",
+    "react": "^19.2.8",
+    "ssh2": "^1.17.0",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.18",
+    "@types/ssh2": "^1.15.0",
+    "ink-testing-library": "^4.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0"
+  }
+}
