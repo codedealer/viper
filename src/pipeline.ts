@@ -56,6 +56,6 @@ export function updateSteps(ctx: StepCtx, config: ServerConfig, opts: PipelineSt
  * (vhosts, acme cron, web files). Idempotent; the local state file is
  * deliberately NOT deleted (re-deploy stays possible).
  */
-export function teardownSteps(ctx: StepCtx): Step[] {
-  return [...xrayTeardownSteps(), ...nginxTeardownSteps(ctx)];
+export function teardownSteps(): Step[] {
+  return [...xrayTeardownSteps(), ...nginxTeardownSteps()];
 }

@@ -126,8 +126,8 @@ test("ssh: fresh box → drop-in written, neutralized, validated, effective-chec
   assertGolden(import.meta.url, "sshd-00-viper.conf", renderSshdDropin());
   const cmds = remote.commands;
   const neutralizeIdx = cmds.findIndex((x) => x.startsWith("for f in /etc/ssh/sshd_config.d"));
-  const validateIdx = cmds.findIndex((x) => x === "sshd -t");
-  const effectiveIdx = cmds.findIndex((x) => x === "sshd -T 2>/dev/null");
+  const validateIdx = cmds.indexOf("sshd -t");
+  const effectiveIdx = cmds.indexOf("sshd -T 2>/dev/null");
   const restartIdx = cmds.findIndex((x) => x.startsWith("systemctl restart sshd"));
   assert.ok(neutralizeIdx >= 0 && validateIdx > neutralizeIdx, "neutralize then validate");
   assert.ok(effectiveIdx > validateIdx, "effective check after validation");
@@ -291,9 +291,9 @@ test("bbr: fresh box (module kernel) → probe, modprobe, sysctls, persist; seco
   assert.equal(first.status, "changed");
   const cmds = remote.commands;
   const probeIdx = cmds.findIndex((x) => x.includes("tcp_available_congestion_control"));
-  const modprobeIdx = cmds.findIndex((x) => x === "modprobe tcp_bbr 2>/dev/null");
-  const qdiscIdx = cmds.findIndex((x) => x === "sysctl -w net.core.default_qdisc=fq");
-  const cbrIdx = cmds.findIndex((x) => x === "sysctl -w net.ipv4.tcp_congestion_control=bbr");
+  const modprobeIdx = cmds.indexOf("modprobe tcp_bbr 2>/dev/null");
+  const qdiscIdx = cmds.indexOf("sysctl -w net.core.default_qdisc=fq");
+  const cbrIdx = cmds.indexOf("sysctl -w net.ipv4.tcp_congestion_control=bbr");
   assert.ok(probeIdx >= 0, "availability probed");
   assert.ok(modprobeIdx > probeIdx, "modprobe after probe");
   assert.ok(qdiscIdx > modprobeIdx && cbrIdx > modprobeIdx, "sysctls after modprobe");
@@ -386,8 +386,8 @@ test("ufw: fresh box → allows BEFORE enable, no `ufw limit`, custom ports only
   const first = await step.run(remote, c);
   assert.equal(first.status, "changed");
   const cmds = remote.commands;
-  const allowIdx = cmds.findIndex((x) => x === "ufw allow 22/tcp");
-  const enableIdx = cmds.findIndex((x) => x === "ufw --force enable");
+  const allowIdx = cmds.indexOf("ufw allow 22/tcp");
+  const enableIdx = cmds.indexOf("ufw --force enable");
   assert.ok(allowIdx >= 0 && enableIdx > allowIdx, "allow before enable");
   assert.ok(!cmds.some((x) => x.includes("ufw limit")), "no ufw limit");
   assert.ok(cmds.includes("ufw allow 443/tcp") && cmds.includes("ufw allow 80/tcp"));

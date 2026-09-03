@@ -475,7 +475,7 @@ test("pipeline: page body without the marker fails verify (no step/renderer drif
 test("teardown: after a deploy — removes M6 artifacts only", async () => {
   const remote = new FakeRemote();
   await deploy(remote);
-  const report = await runSteps(nginxTeardownSteps(ctx()), remote, ctx(), { quiet: true });
+  const report = await runSteps(nginxTeardownSteps(), remote, ctx(), { quiet: true });
   assert.equal(report.failed, false, JSON.stringify(report.results));
   const byName = new Map(report.results.map((r) => [r.name, r.status]));
   assert.equal(byName.get("Remove viper nginx vhosts (teardown)"), "changed");
@@ -498,7 +498,7 @@ test("teardown: after a deploy — removes M6 artifacts only", async () => {
 
 test("teardown: nothing present — all ok, zero mutating calls", async () => {
   const remote = new FakeRemote();
-  const report = await runSteps(nginxTeardownSteps(ctx()), remote, ctx(), { quiet: true });
+  const report = await runSteps(nginxTeardownSteps(), remote, ctx(), { quiet: true });
   assert.equal(report.failed, false);
   assert.ok(report.results.every((r) => r.status === "ok"));
   assert.equal(remote.mutatingCommands().length, 0);
@@ -507,8 +507,8 @@ test("teardown: nothing present — all ok, zero mutating calls", async () => {
 test("teardown: idempotent — second run all ok", async () => {
   const remote = new FakeRemote();
   await deploy(remote);
-  await runSteps(nginxTeardownSteps(ctx()), remote, ctx(), { quiet: true });
-  const report = await runSteps(nginxTeardownSteps(ctx()), remote, ctx(), { quiet: true });
+  await runSteps(nginxTeardownSteps(), remote, ctx(), { quiet: true });
+  const report = await runSteps(nginxTeardownSteps(), remote, ctx(), { quiet: true });
   assert.equal(report.failed, false);
   assert.ok(report.results.every((r) => r.status === "ok"));
 });

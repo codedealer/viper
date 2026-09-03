@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { PAGE_MARKER, renderPage } from "../src/render/page.js";
 import { assertGolden } from "./golden.js";

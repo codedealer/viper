@@ -93,7 +93,7 @@ test("updateSteps: xray deploy + verify + nginx only (contract D3)", () => {
 });
 
 test("teardownSteps: xray teardown then nginx teardown (contract D6)", () => {
-  const got = names(teardownSteps(ctx));
+  const got = names(teardownSteps());
   assert.deepEqual(got, [
     "Remove Xray (teardown)",
     "Remove viper nginx vhosts (teardown)",

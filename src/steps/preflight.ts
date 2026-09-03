@@ -13,7 +13,6 @@
  * Only write: persisting the captured host key into state (via the
  * injected persister). Everything else is read-only.
  */
-import type { SshConn } from "../ssh.js";
 import type { Step, StepResult } from "./runner.js";
 import {
   MIN_DISK_SPACE_MB,

@@ -7,7 +7,6 @@
  * (for teardown, M7+) and persisted through the injected persister.
  * Idempotent: all present → ok, zero mutating calls.
  */
-import type { SshConn } from "../ssh.js";
 import type { Step, StepResult } from "./runner.js";
 import { REQUIRED_PACKAGES, errDetail, type HardeningStepOptions } from "./common.js";
 
@@ -24,6 +23,7 @@ export function packagesStep(opts: HardeningStepOptions = {}): Step {
        * the parser below would never recognize anything as installed and
        * would re-install every run.
        */
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: dpkg --showformat variable consumed by remote dpkg, not JS interpolation
       const checkCmd = "dpkg-query -W --showformat='${Package} ${Status}\\n' " + REQUIRED_PACKAGES.join(" ");
       const check = await conn.run(checkCmd, { timeoutMs: 15_000 });
 

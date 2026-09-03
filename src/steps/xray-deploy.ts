@@ -15,7 +15,6 @@
  * Idempotent: current `/etc/xray/config.json` already identical to the
  * render → ok, zero mutating calls (no upload, no restart).
  */
-import type { SshConn } from "../ssh.js";
 import type { Step, StepResult } from "./runner.js";
 import { poll, uploadRendered, errDetail } from "./common.js";
 import type { PollOptions } from "./common.js";

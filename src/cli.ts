@@ -208,8 +208,8 @@ function printSubscription(sub: { url: string; lines: string[] }): void {
 }
 
 /** Connect (host key verified), run the composed pipeline, report. */
-async function runPipeline(projectDir: string, ctx: StepCtx, steps: Step[], label: string): Promise<void> {
-  const { config, ip, name, state } = ctx;
+async function runPipeline(ctx: StepCtx, steps: Step[], label: string): Promise<void> {
+  const { config, ip, state } = ctx;
   const conn = await connectServer(config, ip, state, label);
   try {
     const report = await runSteps(steps, conn, ctx);
@@ -275,7 +275,7 @@ async function runDeploy(projectDir: string, flags: CliFlags): Promise<void> {
   const { state } = await ensureState(projectDir, config);
   const ctx = await buildAndStage(projectDir, config, state, ip);
   const opts = pipelineOpts(projectDir, name, await loadHeroBase64(projectDir));
-  await runPipeline(projectDir, ctx, deploySteps(ctx, config, opts), `${name} deploy`);
+  await runPipeline(ctx, deploySteps(ctx, config, opts), `${name} deploy`);
 }
 
 /** `update` (D3): no-disruption redeploy — xray deploy/verify + nginx only. */
@@ -284,7 +284,7 @@ async function runUpdate(projectDir: string, flags: CliFlags): Promise<void> {
   const { state } = await ensureState(projectDir, config);
   const ctx = await buildAndStage(projectDir, config, state, ip);
   const opts = pipelineOpts(projectDir, name, await loadHeroBase64(projectDir));
-  await runPipeline(projectDir, ctx, updateSteps(ctx, config, opts), `${name} update`);
+  await runPipeline(ctx, updateSteps(ctx, config, opts), `${name} update`);
 }
 
 /**
@@ -309,7 +309,7 @@ async function runRotate(projectDir: string, flags: CliFlags): Promise<void> {
 
   const ctx = await buildAndStage(projectDir, config, rotated, ip);
   const opts = pipelineOpts(projectDir, name, await loadHeroBase64(projectDir));
-  await runPipeline(projectDir, ctx, updateSteps(ctx, config, opts), `${name} rotate`);
+  await runPipeline(ctx, updateSteps(ctx, config, opts), `${name} rotate`);
 
   const sub = renderSub(config, rotated);
   console.log("");
@@ -340,7 +340,7 @@ async function runTeardown(projectDir: string, flags: CliFlags): Promise<void> {
   }
   const state = await loadState(path);
   const ctx = await buildAndStage(projectDir, config, state, ip);
-  await runPipeline(projectDir, ctx, teardownSteps(ctx), `${name} teardown`);
+  await runPipeline(ctx, teardownSteps(), `${name} teardown`);
   console.log("");
   console.log(`state/${name}.yml kept (re-deploy stays possible); hardening NOT undone.`);
 }

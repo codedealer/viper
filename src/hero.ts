@@ -14,7 +14,7 @@ export async function loadHeroBase64(projectDir: string): Promise<string> {
   const path = join(projectDir, HERO_REL);
   try {
     return await readFile(path, "base64");
-  } catch (err) {
+  } catch {
     throw new ConfigError(
       `hero: missing hero image "${HERO_REL}" (required for the decoy page) ` +
         `— put assets/images/hero.webp in the project directory and re-run`,

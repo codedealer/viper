@@ -56,7 +56,7 @@ function makeStep(name: string, record: string[], behavior: () => StepResult | n
   };
 }
 
-async function run(record: string[], steps: Step[], opts?: { quiet?: boolean }): Promise<RunStepsReport> {
+async function run(steps: Step[], opts?: { quiet?: boolean }): Promise<RunStepsReport> {
   return runSteps(steps, makeFakeConn(), ctx(), opts);
 }
 
@@ -81,7 +81,7 @@ async function withCapturedConsole<T>(
 
 test("sequential order, all ok — nothing unrun", async () => {
   const record: string[] = [];
-  const report = await run(record, [
+  const report = await run([
     makeStep("a", record, () => ({ status: "ok" })),
     makeStep("b", record, () => ({ status: "changed", detail: "installed 3 pkgs" })),
     makeStep("c", record, () => ({ status: "skipped", detail: "already set" })),
@@ -102,7 +102,7 @@ test("sequential order, all ok — nothing unrun", async () => {
 
 test("stop on first failure: later steps unrun and reported", async () => {
   const record: string[] = [];
-  const report = await run(record, [
+  const report = await run([
     makeStep("a", record, () => ({ status: "ok" })),
     makeStep("b", record, () => ({ status: "failed", detail: "apt exit 100" })),
     makeStep("c", record, () => ({ status: "ok" })),
@@ -117,7 +117,7 @@ test("stop on first failure: later steps unrun and reported", async () => {
 test("trace: ✓/– lines to stdout, ✗ line to stderr, contract formats", async () => {
   const record: string[] = [];
   const { out, err, result } = await withCapturedConsole(() =>
-    run(record, [
+    run([
       makeStep("install xray", record, () => ({ status: "changed", detail: "v26.3.27" })),
       makeStep("set timezone", record, () => ({ status: "skipped", detail: "already UTC" })),
       makeStep("start service", record, () => ({ status: "ok" })),
@@ -136,7 +136,7 @@ test("trace: ✓/– lines to stdout, ✗ line to stderr, contract formats", asy
 test("quiet: no trace output", async () => {
   const record: string[] = [];
   const { out, err, result } = await withCapturedConsole(() =>
-    run(record, [makeStep("a", record, () => ({ status: "failed", detail: "x" }))], { quiet: true }),
+    run([makeStep("a", record, () => ({ status: "failed", detail: "x" }))], { quiet: true }),
   );
   assert.deepEqual(out, []);
   assert.deepEqual(err, []);
@@ -145,7 +145,7 @@ test("quiet: no trace output", async () => {
 
 test("step exception → failed with message; runner never crashes", async () => {
   const record: string[] = [];
-  const report = await run(record, [
+  const report = await run([
     makeStep("ok-step", record, () => ({ status: "ok" })),
     makeStep("throwing", record, () => {
       throw new Error("boom: ssh: upload to /etc/xray/config.json failed");
@@ -181,7 +181,7 @@ test("steps receive the conn and ctx; sync StepResult works", async () => {
 
 test("first step fails: unrun lists everything after it", async () => {
   const record: string[] = [];
-  const report = await run(record, [
+  const report = await run([
     makeStep("one", record, () => ({ status: "failed" })),
     makeStep("two", record, () => ({ status: "ok" })),
   ]);

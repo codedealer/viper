@@ -11,7 +11,6 @@
  *    which M6's deploy overwrites)
  *  - the `unzip` tool dependency (apt-level, recorded in state for M7)
  */
-import type { SshConn } from "../ssh.js";
 import type { Step, StepResult } from "./runner.js";
 import { errDetail } from "./common.js";
 import { XRAY_BIN, XRAY_GEO_DIR, XRAY_UNIT } from "./xray-install.js";

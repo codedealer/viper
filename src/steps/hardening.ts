@@ -15,7 +15,6 @@
  *  - BBR: warn-not-fail (skipped + WARNING) on kernels without the
  *    tunables.
  */
-import type { SshConn } from "../ssh.js";
 import type { ServerConfig } from "../config.js";
 import type { Step, StepCtx, StepResult } from "./runner.js";
 import { detectSshdPorts, errDetail, uploadRendered, type HardeningStepOptions } from "./common.js";

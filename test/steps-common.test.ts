@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { noRecordOrRethrow, uploadRendered, defaultDnsResolver } from "../src/steps/common.js";
 import { autoUpgradesStep, AUTO_UPGRADES_PATH } from "../src/steps/hardening.js";
 import { runSteps, type StepCtx } from "../src/steps/runner.js";

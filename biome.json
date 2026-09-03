@@ -21,7 +21,8 @@
     "rules": {
       "preset": "recommended",
       "style": {
-        "useTemplate": "off"
+        "useTemplate": "off",
+        "useImportType": "off"
       }
     }
   },

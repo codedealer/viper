@@ -1,18 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { xraySteps, xrayTeardownSteps } from "../src/steps/xray.js";
-import { fixtureConfig, fixtureState } from "./fixtures.js";
-import type { StepCtx } from "../src/steps/runner.js";
-
-function ctx(): StepCtx {
-  return {
-    name: "main",
-    ip: fixtureConfig.ip,
-    config: fixtureConfig,
-    state: { ...fixtureState, installedPackages: [] },
-    artifacts: {},
-  };
-}
 
 test("xraySteps — ordered install → deploy → verify triple (no ctx/config params)", () => {
   const steps = xraySteps();

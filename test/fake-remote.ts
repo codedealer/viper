@@ -366,6 +366,7 @@ export class FakeRemote implements SshConn {
       const m = cmd.match(/^dpkg-query -W --showformat='([^']*)' (.+)$/);
       const fmt = m !== null ? (m[1] ?? "") : "";
       const wanted = m !== null ? (m[2] ?? "").trim().split(/\s+/) : [];
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: dpkg --showformat variable string, not JS interpolation
       const withNames = fmt.includes("${Package}");
       const lines = wanted
         .filter((p) => this.packages.has(p))

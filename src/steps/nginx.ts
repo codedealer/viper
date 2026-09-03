@@ -134,6 +134,7 @@ export function ensureCronStep(): Step {
   return {
     name: "Ensure cron service",
     run: async (conn): Promise<StepResult> => {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: dpkg --showformat variable consumed by remote dpkg, not JS interpolation
       const check = await conn.run("dpkg-query -W --showformat='${Package} ${Status}\\n' cron", {
         timeoutMs: 15_000,
       });
@@ -496,7 +497,7 @@ export function nginxSteps(ctx: StepCtx, _config: ServerConfig, opts: NginxStepO
  * mutating calls. Does NOT remove the nginx package (M4 ownership) or
  * `/root/.acme.sh/` (plan + Meridian pitfall) — documented in the report.
  */
-export function nginxTeardownSteps(ctx: StepCtx): Step[] {
+export function nginxTeardownSteps(): Step[] {
   return [teardownVhostsStep(), teardownCronStep(), teardownWebFilesStep()];
 }
 

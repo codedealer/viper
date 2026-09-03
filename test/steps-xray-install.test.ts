@@ -23,8 +23,6 @@ function ctx(): StepCtx {
   };
 }
 
-const FAST = { attempts: 3, intervalMs: 1 } as const;
-
 test("pure: pinnedVersion strips leading v", () => {
   assert.equal(pinnedVersion("v26.3.27"), "26.3.27");
   assert.equal(pinnedVersion("26.3.27"), "26.3.27");

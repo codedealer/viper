@@ -232,7 +232,7 @@ export async function collectStatus(
     const probe = xrayHandshakeProbeStep(opts.poll ?? {});
     const r = await probe.run(conn, ctx);
     handshake = {
-      ok: r.status !== "failed" ? true : false,
+      ok: r.status !== "failed",
       detail: r.detail ?? r.status,
     };
     const certRes = await conn

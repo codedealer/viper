@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
-import { connect, type CommandResult, type RemoteHost } from "../src/ssh.js";
+import { connect, type RemoteHost } from "../src/ssh.js";
 
 /**
  * Engine tests run against a fake ssh2 transport (injected client factory)
@@ -123,13 +123,13 @@ class FakeClient {
   }
   // --- test drivers ---
   emitReady() {
-    for (const h of this.handlers["ready"] ?? []) h();
+    for (const h of this.handlers.ready ?? []) h();
   }
   emitError(e: unknown) {
-    for (const h of this.handlers["error"] ?? []) h(e);
+    for (const h of this.handlers.error ?? []) h(e);
   }
   emitClose() {
-    for (const h of this.handlers["close"] ?? []) h();
+    for (const h of this.handlers.close ?? []) h();
   }
 }
 
