@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  xrayUnitActiveStep,
-  xrayListeningStep,
-  xrayHandshakeProbeStep,
-} from "../src/steps/xray-verify.js";
+import { xrayUnitActiveStep, xrayListeningStep, xrayHandshakeProbeStep } from "../src/steps/xray-verify.js";
 import { renderXrayProbeClient } from "../src/render/xray-probe.js";
 import { FakeRemote } from "./fake-remote.js";
 import { fixtureConfig, fixtureState, multiClientConfig, multiClientState } from "./fixtures.js";
@@ -81,10 +77,7 @@ test("probe: orphan from a previously failed run is reaped before start", async 
   const cmds = remote.commands;
   const pkillIdx = cmds.findIndex((c) => c.startsWith("pkill -f "));
   assert.ok(pkillIdx >= 0, "pkill reap issued");
-  assert.ok(
-    pkillIdx < cmds.findIndex((c) => c.includes("exec nohup xray run")),
-    "reap happens before start",
-  );
+  assert.ok(pkillIdx < cmds.findIndex((c) => c.includes("exec nohup xray run")), "reap happens before start");
 });
 
 test("probe: curl does not return 204 — failed, log tailed, cleaned up", async () => {
@@ -134,10 +127,7 @@ test("probe: multi-client — EVERY client is probed (R10.4)", async () => {
     );
   }
   // Three full probe cycles: 3 curls, 3 pid kills, 3 sandbox removals.
-  assert.equal(
-    remote.commands.filter((x) => x.startsWith("curl --socks5-hostname")).length,
-    3,
-  );
+  assert.equal(remote.commands.filter((x) => x.startsWith("curl --socks5-hostname")).length, 3);
   assert.equal(remote.commands.filter((x) => x.startsWith("kill ")).length, 3);
   assert.equal(remote.commands.filter((x) => x === "rm -rf /tmp/viper-probe").length, 3);
 });

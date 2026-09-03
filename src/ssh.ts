@@ -250,7 +250,7 @@ class SshConnection implements SshConn {
             resolve();
           });
         } catch {
-            // ignore
+          // ignore
         }
         try {
           client.end();
@@ -306,9 +306,7 @@ class SshConnection implements SshConn {
       try {
         privateKey = await readFile(this.host.privateKeyPath, "utf8");
       } catch (err) {
-        throw new Error(
-          `ssh: cannot read private key "${this.host.privateKeyPath}": ${errMsg(err)}`,
-        );
+        throw new Error(`ssh: cannot read private key "${this.host.privateKeyPath}": ${errMsg(err)}`);
       }
     }
 
@@ -429,12 +427,7 @@ class SshConnection implements SshConn {
     const sftp = await new Promise<AnySftp>((resolve, reject) => {
       client.sftp((err, s) => {
         if (err || s === undefined) {
-          reject(
-            wrapError(
-              `ssh: sftp session failed: ${errMsg(err ?? new Error("no session"))}`,
-              err,
-            ),
-          );
+          reject(wrapError(`ssh: sftp session failed: ${errMsg(err ?? new Error("no session"))}`, err));
           return;
         }
         resolve(s);

@@ -18,7 +18,9 @@ function ctx(overrides: Partial<StepCtx> = {}): StepCtx {
   };
 }
 
-const resolveTo = (ip: string): DnsResolver => async () => [ip];
+const resolveTo =
+  (ip: string): DnsResolver =>
+  async () => [ip];
 const noRecord: DnsResolver = async () => [];
 const resolverFails: DnsResolver = async () => {
   throw new Error("getaddrinfo EAI_AGAIN vpn.example.com");
@@ -148,7 +150,10 @@ test("preflight: DNS no A record → failed 'create an A record'", async () => {
   const remote = new FakeRemote();
   const res = await runStep(remote, ctx(), { dnsResolver: noRecord });
   assert.equal(res.status, "failed");
-  assert.match(res.detail ?? "", /vpn\.example\.com does not resolve — create an A record for vpn\.example\.com → 203\.0\.113\.10/);
+  assert.match(
+    res.detail ?? "",
+    /vpn\.example\.com does not resolve — create an A record for vpn\.example\.com → 203\.0\.113\.10/,
+  );
 });
 
 test("preflight: DNS wrong IP → failed with grey-cloud hint", async () => {
@@ -192,10 +197,7 @@ test("preflight: DNS message uses the EFFECTIVE ip (ctx.ip), not config.ip", asy
   const c = ctx({ ip: "198.51.100.99", config: fixtureConfig });
   const res = await runStep(remote, c, { dnsResolver: noRecord });
   assert.equal(res.status, "failed");
-  assert.match(
-    res.detail ?? "",
-    /create an A record for vpn\.example\.com → 198\.51\.100\.99/,
-  );
+  assert.match(res.detail ?? "", /create an A record for vpn\.example\.com → 198\.51\.100\.99/);
 });
 
 test("preflight: read-only — no mutating commands, no uploads", async () => {

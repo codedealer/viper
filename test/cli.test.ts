@@ -170,18 +170,13 @@ test("teardown: requires an existing state file", async () => {
 
 function runCli(args: string[]): Promise<{ code: number; out: string; err: string }> {
   return new Promise((resolve) => {
-    execFile(
-      "pnpm",
-      ["viper", ...args],
-      { cwd: REPO_ROOT, timeout: 60_000 },
-      (error, stdout, stderr) => {
-        resolve({
-          code: error instanceof Error ? Number((error as NodeJS.ErrnoException).code ?? 1) : 0,
-          out: stdout,
-          err: stderr,
-        });
-      },
-    );
+    execFile("pnpm", ["viper", ...args], { cwd: REPO_ROOT, timeout: 60_000 }, (error, stdout, stderr) => {
+      resolve({
+        code: error instanceof Error ? Number((error as NodeJS.ErrnoException).code ?? 1) : 0,
+        out: stdout,
+        err: stderr,
+      });
+    });
   });
 }
 

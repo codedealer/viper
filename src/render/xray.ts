@@ -100,9 +100,7 @@ export function renderXray(config: ServerConfig, state: State): string {
     dns: {},
     stats: {},
     sniffing:
-      config.sniffing === true
-        ? { enabled: true, destOverride: ["http", "tls"] }
-        : { enabled: false },
+      config.sniffing === true ? { enabled: true, destOverride: ["http", "tls"] } : { enabled: false },
   };
 
   return JSON.stringify(cfg, null, 2) + "\n";

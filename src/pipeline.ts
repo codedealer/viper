@@ -20,16 +20,8 @@ import type { ServerConfig } from "./config.js";
 import { hardeningSteps } from "./steps/hardening.js";
 import { xraySteps, xrayTeardownSteps } from "./steps/xray.js";
 import { xrayDeployStep } from "./steps/xray-deploy.js";
-import {
-  xrayUnitActiveStep,
-  xrayListeningStep,
-  xrayHandshakeProbeStep,
-} from "./steps/xray-verify.js";
-import {
-  nginxSteps,
-  nginxTeardownSteps,
-  type NginxStepOptions,
-} from "./steps/nginx.js";
+import { xrayUnitActiveStep, xrayListeningStep, xrayHandshakeProbeStep } from "./steps/xray-verify.js";
+import { nginxSteps, nginxTeardownSteps, type NginxStepOptions } from "./steps/nginx.js";
 import type { PollOptions } from "./steps/common.js";
 /**
  * Options shared by all composed pipelines: the M6 hero seam, the M4 DNS
@@ -40,16 +32,8 @@ export interface PipelineStepOptions extends NginxStepOptions {
 }
 
 /** Full fresh-VPS pipeline (contract D1, order as listed there). */
-export function deploySteps(
-  ctx: StepCtx,
-  config: ServerConfig,
-  opts: PipelineStepOptions = {},
-): Step[] {
-  return [
-    ...hardeningSteps(ctx, config, opts),
-    ...xraySteps(opts),
-    ...nginxSteps(ctx, config, opts),
-  ];
+export function deploySteps(ctx: StepCtx, config: ServerConfig, opts: PipelineStepOptions = {}): Step[] {
+  return [...hardeningSteps(ctx, config, opts), ...xraySteps(opts), ...nginxSteps(ctx, config, opts)];
 }
 
 /**
@@ -57,11 +41,7 @@ export function deploySteps(
  * in ctx.artifacts; the xray config swap stays validate-before-swap and
  * the nginx changes stay `nginx -t`-gated (step-internal behavior).
  */
-export function updateSteps(
-  ctx: StepCtx,
-  config: ServerConfig,
-  opts: PipelineStepOptions = {},
-): Step[] {
+export function updateSteps(ctx: StepCtx, config: ServerConfig, opts: PipelineStepOptions = {}): Step[] {
   return [
     xrayDeployStep(opts.poll),
     xrayUnitActiveStep(),

@@ -23,24 +23,13 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import React from "react";
 import { render } from "ink";
-import {
-  assertValidIpv4,
-  ConfigError,
-  loadServers,
-  resolveServerName,
-  type ServerConfig,
-} from "./config.js";
+import { assertValidIpv4, ConfigError, loadServers, resolveServerName, type ServerConfig } from "./config.js";
 import { ensureState, loadState, saveState, statePath, type State } from "./state.js";
 import { rotateState } from "./rotate.js";
 import { loadHeroBase64 } from "./hero.js";
 import { connect, type SshConn } from "./ssh.js";
 import { runSteps, type Step, type StepCtx } from "./steps/runner.js";
-import {
-  deploySteps,
-  updateSteps,
-  teardownSteps,
-  type PipelineStepOptions,
-} from "./pipeline.js";
+import { deploySteps, updateSteps, teardownSteps, type PipelineStepOptions } from "./pipeline.js";
 import { collectStatus, renderStatusSnapshot, type StatusData } from "./status.js";
 import { StatusTui } from "./status-tui.js";
 import { renderNginx } from "./render/nginx.js";

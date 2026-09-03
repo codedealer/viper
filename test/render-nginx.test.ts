@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { renderNginx } from "../src/render/nginx.js";
-import {
-  fixtureConfig,
-  fixtureState,
-  knobConfig,
-  knobState,
-} from "./fixtures.js";
+import { fixtureConfig, fixtureState, knobConfig, knobState } from "./fixtures.js";
 import { assertGolden } from "./golden.js";
 
 test("default knobs — golden :80 ACME vhost", () => {
@@ -32,7 +27,10 @@ test("default knobs — golden :8443 loopback web vhost", () => {
   assert.match(c8443, /location = \/ \{[^}]*root \/var\/www\/viper\/main;/s);
   assert.match(c8443, /location = \/index\.html \{[^}]*root \/var\/www\/viper\/main;/s);
   assert.match(c8443, /location = \/login \{[^}]*alias \/var\/www\/viper\/main\/index\.html;/s);
-  assert.match(c8443, /location = \/deadbeefcafebabe1234567890abcdef\/sub\.txt \{[^}]*alias \/var\/www\/viper\/main\/sub\.txt;/s);
+  assert.match(
+    c8443,
+    /location = \/deadbeefcafebabe1234567890abcdef\/sub\.txt \{[^}]*alias \/var\/www\/viper\/main\/sub\.txt;/s,
+  );
   assert.match(c8443, /return 404;/);
   assert.match(c8443, /server_tokens off;/);
   assert.ok(!/auth_basic/.test(c8443), "no auth on the loopback vhost (v1)");

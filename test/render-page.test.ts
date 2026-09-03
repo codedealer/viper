@@ -48,10 +48,7 @@ test("form is inert: always fails, no success path", () => {
     !/success|logged in|signed in|welcome back/i.test(html),
     "no success/login state anywhere in the page",
   );
-  assert.ok(
-    !/location\.(href|replace|assign)|window\.open/i.test(html),
-    "no navigation away from the page",
-  );
+  assert.ok(!/location\.(href|replace|assign)|window\.open/i.test(html), "no navigation away from the page");
   // exactly one script block: the inert submit handler
   assert.equal(html.match(/<script>/g)?.length, 1);
 });
@@ -62,9 +59,7 @@ test("no framework, build or generation fingerprints", () => {
   // and can coincidentally contain any ASCII substring (e.g. "vUE").
   const markup = html.replace(/data:[^"\n]+/g, "data:…");
   assert.ok(
-    !/react|vue|angular|jquery|svelte|solid-js|preact|webpack|vite|__NEXT|data-astro|nuxt/i.test(
-      markup,
-    ),
+    !/react|vue|angular|jquery|svelte|solid-js|preact|webpack|vite|__NEXT|data-astro|nuxt/i.test(markup),
     "no JS framework names",
   );
   assert.ok(!/<meta\s+name="generator"/i.test(markup), "no generator meta");

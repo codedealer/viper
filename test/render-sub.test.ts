@@ -45,10 +45,7 @@ test("multi-client — golden sub (one line per client, config order)", () => {
   assert.ok(sub.lines[1]?.endsWith("#phone"));
   assert.ok(sub.lines[2]?.endsWith("#work"));
   // decoded body = vless lines + one routing line at the end
-  const decoded = Buffer.from(sub.base64, "base64")
-    .toString("utf8")
-    .trimEnd()
-    .split("\n");
+  const decoded = Buffer.from(sub.base64, "base64").toString("utf8").trimEnd().split("\n");
   assert.equal(decoded.length, 4);
   assert.ok(decoded[3]?.startsWith("happ://routing/onadd/"));
   assert.ok(decoded.slice(0, 3).every((l) => l.startsWith("vless://")));
@@ -68,17 +65,14 @@ test("routing line present, last, and decodes to the documented profile", () => 
   ) as Record<string, unknown>;
   assert.equal(profile.GlobalProxy, "true");
   assert.equal(profile.DomainStrategy, "IPIfNonMatch");
-  assert.deepEqual(
-    profile.DirectIp,
-    [
-      "10.0.0.0/8",
-      "172.16.0.0/12",
-      "192.168.0.0/16",
-      "169.254.0.0/16",
-      "224.0.0.0/4",
-      "255.255.255.255",
-    ],
-  );
+  assert.deepEqual(profile.DirectIp, [
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "169.254.0.0/16",
+    "224.0.0.0/4",
+    "255.255.255.255",
+  ]);
   assert.equal(
     profile.Geoipurl,
     "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",

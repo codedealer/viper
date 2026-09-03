@@ -82,10 +82,7 @@ test("uploadRendered: uploads the exact content and cleans up the temp dir", asy
 test("uploadRendered: SFTP failure → throws, temp dir still cleaned up (R11.1)", async () => {
   const remote = new FakeRemote({ uploadFails: "sftp: session closed" });
   const before = new Set(viperTmpDirs());
-  await assert.rejects(
-    uploadRendered(remote, "x", "/tmp/dest.conf", "dest.conf"),
-    /sftp: session closed/,
-  );
+  await assert.rejects(uploadRendered(remote, "x", "/tmp/dest.conf", "dest.conf"), /sftp: session closed/);
   await assertNoTmpLeak(before, "failure");
 });
 

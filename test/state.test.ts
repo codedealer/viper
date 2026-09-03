@@ -138,14 +138,8 @@ test("parseState rejects corrupted state", () => {
     installedPackages: [],
   };
   assert.deepEqual(parseState(ok), ok);
-  assert.throws(() =>
-    parseState({ ...ok, reality: { ...ok.reality, publicKey: "!!!" } }),
-    /publicKey/,
-  );
-  assert.throws(
-    () => parseState({ ...ok, subHash: "xyz" }),
-    /subHash/,
-  );
+  assert.throws(() => parseState({ ...ok, reality: { ...ok.reality, publicKey: "!!!" } }), /publicKey/);
+  assert.throws(() => parseState({ ...ok, subHash: "xyz" }), /subHash/);
   assert.throws(
     () => parseState({ ...ok, shortId: "abc" }),
     /shortId/, // odd-length hex
@@ -206,9 +200,15 @@ test("M4 state fields: hostKey + installedPackages parse, validate, round-trip",
 
   // invalid values rejected
   assert.throws(() => parseState({ ...doc, hostKey: { fingerprint: "md5:abcd" } }), /hostKey.fingerprint/);
-  assert.throws(() => parseState({ ...doc, hostKey: { fingerprint: "sha256:short" } }), /hostKey.fingerprint/);
+  assert.throws(
+    () => parseState({ ...doc, hostKey: { fingerprint: "sha256:short" } }),
+    /hostKey.fingerprint/,
+  );
   // lowercase "sha256:" is NOT the stored format (OpenSSH uses SHA256:)
-  assert.throws(() => parseState({ ...doc, hostKey: { fingerprint: "sha256:" + "A".repeat(43) } }), /hostKey.fingerprint/);
+  assert.throws(
+    () => parseState({ ...doc, hostKey: { fingerprint: "sha256:" + "A".repeat(43) } }),
+    /hostKey.fingerprint/,
+  );
   assert.throws(() => parseState({ ...doc, hostKey: "plain" }), /hostKey/);
   assert.throws(() => parseState({ ...doc, installedPackages: "nginx" }), /installedPackages/);
   assert.throws(() => parseState({ ...doc, installedPackages: ["nginx", ""] }), /installedPackages/);

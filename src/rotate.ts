@@ -14,11 +14,7 @@
  *  - `shortId` (state-pinned value; the config-pin behavior of
  *    `shortIdOf` is untouched).
  */
-import {
-  generateRealityKeypair,
-  generateSubHash,
-  generateUuid,
-} from "./keys.js";
+import { generateRealityKeypair, generateSubHash, generateUuid } from "./keys.js";
 import type { State } from "./state.js";
 
 export function rotateState(state: State): State {

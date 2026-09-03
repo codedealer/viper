@@ -108,7 +108,10 @@ async function deployVhost(
   }
   const ln = await conn.run(`ln -sf ${confPath} ${enabledPath}`, { timeoutMs: 10_000 });
   if (ln.code !== 0) {
-    return { status: "failed", detail: `symlinking ${enabledPath} failed: ${errDetail(ln.stderr)}` };
+    return {
+      status: "failed",
+      detail: `symlinking ${enabledPath} failed: ${errDetail(ln.stderr)}`,
+    };
   }
   const test = await conn.run("nginx -t", { timeoutMs: 30_000 });
   if (test.code !== 0) {
@@ -131,16 +134,13 @@ export function ensureCronStep(): Step {
   return {
     name: "Ensure cron service",
     run: async (conn): Promise<StepResult> => {
-      const check = await conn.run(
-        "dpkg-query -W --showformat='${Package} ${Status}\\n' cron",
-        { timeoutMs: 15_000 },
-      );
-      const installed = check.stdout
-        .split("\n")
-        .some((line) => {
-          const f = line.trim().split(/\s+/);
-          return f[0] === "cron" && f[1] === "install" && f[3] === "installed";
-        });
+      const check = await conn.run("dpkg-query -W --showformat='${Package} ${Status}\\n' cron", {
+        timeoutMs: 15_000,
+      });
+      const installed = check.stdout.split("\n").some((line) => {
+        const f = line.trim().split(/\s+/);
+        return f[0] === "cron" && f[1] === "install" && f[3] === "installed";
+      });
 
       let changed = false;
       if (!installed) {
@@ -148,12 +148,14 @@ export function ensureCronStep(): Step {
         if (update.code !== 0) {
           return { status: "failed", detail: `apt-get update failed: ${errDetail(update.stderr)}` };
         }
-        const install = await conn.run(
-          "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq cron",
-          { timeoutMs: 300_000 },
-        );
+        const install = await conn.run("DEBIAN_FRONTEND=noninteractive apt-get install -y -qq cron", {
+          timeoutMs: 300_000,
+        });
         if (install.code !== 0) {
-          return { status: "failed", detail: `apt-get install cron failed: ${errDetail(install.stderr)}` };
+          return {
+            status: "failed",
+            detail: `apt-get install cron failed: ${errDetail(install.stderr)}`,
+          };
         }
         changed = true;
       }
@@ -293,7 +295,10 @@ export function certDeployStep(): Step {
       }
       const reload = await conn.run("systemctl reload nginx", { timeoutMs: 30_000 });
       if (reload.code !== 0) {
-        return { status: "failed", detail: `nginx reload after cert deploy failed: ${errDetail(reload.stderr)}` };
+        return {
+          status: "failed",
+          detail: `nginx reload after cert deploy failed: ${errDetail(reload.stderr)}`,
+        };
       }
       return { status: "changed", detail: "cert deployed, nginx reloaded" };
     },
@@ -391,13 +396,14 @@ export function verifySubStep(): Step {
         };
       }
       const bodyRes = await conn.run(publicCurl(ctx, path, false), { timeoutMs: 60_000 });
-      const expected = renderSub(ctx.config, ctx.state).base64;
-      if (bodyRes.stdout.trim() !== expected.trim()) {
+      const expected = renderSub(ctx.config, ctx.state).base64.trim();
+      const served = bodyRes.stdout.trim();
+      if (served !== expected) {
         return {
           status: "failed",
           detail:
             `sub.txt does not byte-match the locally rendered subscription ` +
-            `(served ${bodyRes.stdout.trim().length} bytes, expected ${expected.length} ` +
+            `(served ${served.length} bytes, expected ${expected.length} ` +
             `— vless line with the state reality pbk + Happ routing line)`,
         };
       }
@@ -444,7 +450,10 @@ export function verifyCertStep(): Step {
           detail: `presented cert issuer is not Let's Encrypt (got: ${res.stdout.trim() || errDetail(res.stderr)})`,
         };
       }
-      return { status: "ok", detail: "public :443 presents the Let's Encrypt cert (Reality borrow)" };
+      return {
+        status: "ok",
+        detail: "public :443 presents the Let's Encrypt cert (Reality borrow)",
+      };
     },
   };
 }
@@ -464,11 +473,7 @@ export interface NginxStepOptions extends HardeningStepOptions {
  * (pure) and travel by SFTP; every remote mutation is check-then-act except
  * the two documented always-runners (acme-cron D3, install-cert D4).
  */
-export function nginxSteps(
-  ctx: StepCtx,
-  _config: ServerConfig,
-  opts: NginxStepOptions = {},
-): Step[] {
+export function nginxSteps(ctx: StepCtx, _config: ServerConfig, opts: NginxStepOptions = {}): Step[] {
   const confs = renderNginx(ctx.config, ctx.state);
   return [
     ensureCronStep(),
@@ -499,10 +504,9 @@ export function teardownVhostsStep(): Step {
   return {
     name: "Remove viper nginx vhosts (teardown)",
     run: async (conn): Promise<StepResult> => {
-      const present = await conn.run(
-        `test -f ${ACME_VHOST} || test -f ${WEB_VHOST}`,
-        { timeoutMs: 10_000 },
-      );
+      const present = await conn.run(`test -f ${ACME_VHOST} || test -f ${WEB_VHOST}`, {
+        timeoutMs: 10_000,
+      });
       if (present.code !== 0) {
         return { status: "ok", detail: "viper vhosts not present" };
       }
@@ -511,7 +515,10 @@ export function teardownVhostsStep(): Step {
         { timeoutMs: 10_000 },
       );
       if (rm.code !== 0) {
-        return { status: "failed", detail: `removing viper vhosts failed: ${errDetail(rm.stderr)}` };
+        return {
+          status: "failed",
+          detail: `removing viper vhosts failed: ${errDetail(rm.stderr)}`,
+        };
       }
       const active = await conn.run("systemctl is-active nginx", { timeoutMs: 15_000 });
       if (active.code === 0 && active.stdout.trim() === "active") {
@@ -568,10 +575,9 @@ export function teardownWebFilesStep(): Step {
     run: async (conn, ctx): Promise<StepResult> => {
       const root = SITE_ROOT(ctx.name);
       const cert = CERT_DIR(ctx.config.domain);
-      const present = await conn.run(
-        `test -d ${root} || test -d ${cert} || test -d ${ACME_WEBROOT}`,
-        { timeoutMs: 10_000 },
-      );
+      const present = await conn.run(`test -d ${root} || test -d ${cert} || test -d ${ACME_WEBROOT}`, {
+        timeoutMs: 10_000,
+      });
       if (present.code !== 0) {
         return { status: "ok", detail: "no viper web files" };
       }

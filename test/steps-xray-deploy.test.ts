@@ -89,7 +89,11 @@ test("deploy: -test failure with an EXISTING live config — old config preserve
 });
 
 test("deploy: restart fails — failed", async () => {
-  const remote = new FakeRemote({ xrayInstalled: true, xrayUnitFile: renderXrayUnit(), xrayRestartFails: true });
+  const remote = new FakeRemote({
+    xrayInstalled: true,
+    xrayUnitFile: renderXrayUnit(),
+    xrayRestartFails: true,
+  });
   const res = await xrayDeployStep(FAST).run(remote, ctx());
   assert.equal(res.status, "failed");
   assert.match(res.detail ?? "", /restart/);

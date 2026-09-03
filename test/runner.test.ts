@@ -44,11 +44,7 @@ function ctx(): StepCtx {
 }
 
 /** Build a step that records its name; scripted result or throw. */
-function makeStep(
-  name: string,
-  record: string[],
-  behavior: () => StepResult | never,
-): Step {
+function makeStep(name: string, record: string[], behavior: () => StepResult | never): Step {
   return {
     name,
     run(conn, c) {

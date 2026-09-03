@@ -171,31 +171,32 @@ export async function collectStatus(
   const runChecks = opts.runChecks === true;
   const subPath = `/${state.subHash}/sub.txt`;
 
-  const [version, unit, unitEnter, hostUptime, top, free, df, stats, subMtime] =
-    await Promise.all([
-      conn.run(`${XRAY_BIN} version`, { timeoutMs: 15_000 }).catch(() => undefined),
-      conn.run("systemctl is-active xray", { timeoutMs: 15_000 }).catch(() => undefined),
-      conn.run("systemctl show xray -p ActiveEnterTimestamp --value", {
+  const [version, unit, unitEnter, hostUptime, top, free, df, stats, subMtime] = await Promise.all([
+    conn.run(`${XRAY_BIN} version`, { timeoutMs: 15_000 }).catch(() => undefined),
+    conn.run("systemctl is-active xray", { timeoutMs: 15_000 }).catch(() => undefined),
+    conn
+      .run("systemctl show xray -p ActiveEnterTimestamp --value", {
         timeoutMs: 15_000,
-      }).catch(() => undefined),
-      conn.run("uptime -p", { timeoutMs: 15_000 }).catch(() => undefined),
-      conn.run("LC_ALL=C top -bn1", { timeoutMs: 20_000 }).catch(() => undefined),
-      conn.run("free -m", { timeoutMs: 15_000 }).catch(() => undefined),
-      conn.run("df -m /", { timeoutMs: 15_000 }).catch(() => undefined),
-      (async () => {
-        // statsApiFromRendered throws synchronously when the rendered
-        // config has no api.listen — keep it inside the promise so it
-        // degrades to undefined like every other command instead of
-        // rejecting the whole snapshot.
-        const api = statsApiFromRendered(config, state);
-        return conn.run(`${XRAY_BIN} api statsquery --server=${api}`, { timeoutMs: 30_000 });
-      })().catch(() => undefined),
-      conn
-        .run(`stat -c %y /var/www/viper/${config.name}/sub.txt 2>/dev/null`, {
-          timeoutMs: 15_000,
-        })
-        .catch(() => undefined),
-    ]);
+      })
+      .catch(() => undefined),
+    conn.run("uptime -p", { timeoutMs: 15_000 }).catch(() => undefined),
+    conn.run("LC_ALL=C top -bn1", { timeoutMs: 20_000 }).catch(() => undefined),
+    conn.run("free -m", { timeoutMs: 15_000 }).catch(() => undefined),
+    conn.run("df -m /", { timeoutMs: 15_000 }).catch(() => undefined),
+    (async () => {
+      // statsApiFromRendered throws synchronously when the rendered
+      // config has no api.listen — keep it inside the promise so it
+      // degrades to undefined like every other command instead of
+      // rejecting the whole snapshot.
+      const api = statsApiFromRendered(config, state);
+      return conn.run(`${XRAY_BIN} api statsquery --server=${api}`, { timeoutMs: 30_000 });
+    })().catch(() => undefined),
+    conn
+      .run(`stat -c %y /var/www/viper/${config.name}/sub.txt 2>/dev/null`, {
+        timeoutMs: 15_000,
+      })
+      .catch(() => undefined),
+  ]);
 
   let statValues: Map<string, number> = new Map();
   if (stats !== undefined && stats.code === 0) {
@@ -234,11 +235,13 @@ export async function collectStatus(
       ok: r.status !== "failed" ? true : false,
       detail: r.detail ?? r.status,
     };
-    const certRes = await conn.run(
-      `echo | openssl s_client -connect ${config.ip}:443 -servername ${config.domain} ` +
-        `2>/dev/null | openssl x509 -noout -subject -issuer -enddate`,
-      { timeoutMs: 60_000 },
-    ).catch(() => undefined);
+    const certRes = await conn
+      .run(
+        `echo | openssl s_client -connect ${config.ip}:443 -servername ${config.domain} ` +
+          `2>/dev/null | openssl x509 -noout -subject -issuer -enddate`,
+        { timeoutMs: 60_000 },
+      )
+      .catch(() => undefined);
     if (certRes !== undefined && certRes.code === 0) {
       const get = (label: string) =>
         certRes.stdout
@@ -262,11 +265,9 @@ export async function collectStatus(
     ip: config.ip,
     domain: config.domain,
     xrayVersion:
-      (version !== undefined && version.code === 0
-        ? parseXrayVersion(version.stdout)
-        : undefined) ?? "unavailable",
-    unitActive:
-      unit !== undefined && unit.code === 0 && unit.stdout.trim() === "active",
+      (version !== undefined && version.code === 0 ? parseXrayVersion(version.stdout) : undefined) ??
+      "unavailable",
+    unitActive: unit !== undefined && unit.code === 0 && unit.stdout.trim() === "active",
     unitUptime: unitEnter?.stdout.trim() ?? "",
     hostUptime: hostUptime?.stdout.trim() ?? "",
     cpu: (top !== undefined ? parseTopCpu(top.stdout) : undefined) ?? "n/a",
@@ -316,8 +317,7 @@ export function renderStatusSnapshot(d: StatusData): string {
   section(
     "Clients",
     d.clients.map(
-      (c) =>
-        `${c.name} (${c.uuid}): up ${formatBytes(c.uplink)}, down ${formatBytes(c.downlink)}`,
+      (c) => `${c.name} (${c.uuid}): up ${formatBytes(c.uplink)}, down ${formatBytes(c.downlink)}`,
     ),
   );
 
@@ -329,10 +329,7 @@ export function renderStatusSnapshot(d: StatusData): string {
       : `cert:      ${d.cert.subject}\n            issuer ${d.cert.issuer}, valid to ${d.cert.validTo}`,
   ]);
 
-  section("Sub", [
-    `path:    ${d.subPath}`,
-    `mtime:   ${d.subMtime}`,
-  ]);
+  section("Sub", [`path:    ${d.subPath}`, `mtime:   ${d.subMtime}`]);
 
   lines.push(`updated: ${new Date(d.fetchedAt).toISOString()}`);
   lines.push("keys: q quit, r re-run checks");

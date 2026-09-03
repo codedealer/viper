@@ -24,11 +24,7 @@ export const PROBE_SOCKS_PORT = 10809;
  *  - vless outbound uses the flat settings form
  *    (address/port/id/encryption/flow) shown in the pinned docs
  */
-export function renderXrayProbeClient(
-  config: ServerConfig,
-  state: State,
-  clientName?: string,
-): string {
+export function renderXrayProbeClient(config: ServerConfig, state: State, clientName?: string): string {
   const name = clientName ?? config.clients[0]?.name;
   if (name === undefined) {
     throw new Error("render/xray-probe: config has no clients");

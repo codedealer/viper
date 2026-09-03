@@ -92,10 +92,7 @@ test("acme-install: fresh — installer runs (no email arg)", async () => {
   const res = await acmeInstallStep().run(remote, ctx());
   assert.equal(res.status, "changed");
   assert.ok(remote.commands.includes("curl -fsSL https://get.acme.sh | sh -s --"));
-  assert.ok(
-    !remote.commands.some((c) => c.includes("email=")),
-    "no email arg (the installer crashes on it)",
-  );
+  assert.ok(!remote.commands.some((c) => c.includes("email=")), "no email arg (the installer crashes on it)");
 });
 
 test("acme-install: already installed — ok, zero mutating calls", async () => {
@@ -155,7 +152,10 @@ test("acme-vhost: fresh — upload → symlink → nginx -t → reload", async (
   assert.equal(upload?.content, rendered);
   const cmds = remote.commands;
   const idx = (frag: string) => cmds.findIndex((c) => c.includes(frag));
-  assert.ok(idx("ln -sf /etc/nginx/sites-available/viper-acme.conf") > idx("cat /etc/nginx/sites-available/viper-acme.conf"));
+  assert.ok(
+    idx("ln -sf /etc/nginx/sites-available/viper-acme.conf") >
+      idx("cat /etc/nginx/sites-available/viper-acme.conf"),
+  );
   assert.ok(idx("nginx -t") > idx("ln -sf"));
   assert.ok(idx("systemctl reload nginx") > idx("nginx -t"), "reload only after a passing nginx -t");
 });
@@ -241,10 +241,7 @@ test("cert-deploy: unchanged md5 — ok, NO reload (D4)", async () => {
   assert.match(res.detail ?? "", /unchanged/);
   assert.equal(remote.nginxReloadCount, before, "no reload when the cert md5 is unchanged");
   // install-cert still re-runs (D4: handles the hook-not-registered edge).
-  assert.equal(
-    remote.commands.filter((c) => c.includes("acme.sh --install-cert -d ")).length,
-    2,
-  );
+  assert.equal(remote.commands.filter((c) => c.includes("acme.sh --install-cert -d ")).length, 2);
 });
 
 test("cert-deploy: install-cert fails — failed", async () => {
@@ -266,7 +263,10 @@ test("page-deploy: fresh — uploads renderPage + renderSub base64", async () =>
   const res = await pageDeployStep(stepOpts()).run(remote, ctx());
   assert.equal(res.status, "changed");
   assert.equal(remote.files.get("/var/www/viper/main/index.html"), renderPage(HERO));
-  assert.equal(remote.files.get("/var/www/viper/main/sub.txt"), renderSub(fixtureConfig, fixtureState).base64);
+  assert.equal(
+    remote.files.get("/var/www/viper/main/sub.txt"),
+    renderSub(fixtureConfig, fixtureState).base64,
+  );
 });
 
 test("page-deploy: unchanged — ok, zero uploads", async () => {
@@ -292,7 +292,9 @@ test("verify-page: served at / and /login via the public path", async () => {
   await deploy(remote);
   const res = await verifyPageStep().run(remote, ctx());
   assert.equal(res.status, "ok");
-  assert.ok(remote.commands.some((c) => c.includes(`--resolve ${fixtureConfig.domain}:443:${fixtureConfig.ip}`)));
+  assert.ok(
+    remote.commands.some((c) => c.includes(`--resolve ${fixtureConfig.domain}:443:${fixtureConfig.ip}`)),
+  );
   assert.ok(remote.commands.some((c) => c.endsWith("https://vpn.example.com/login")));
 });
 

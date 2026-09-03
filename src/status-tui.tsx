@@ -4,13 +4,10 @@
  * loop, the `q`/Ctrl-C quit and `r` re-run-checks keys. Checks run on
  * first load and on `r` — never on the 5 s refresh.
  */
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import type React from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import {
-  formatBytes,
-  type CollectStatusOptions,
-  type StatusData,
-} from "./status.js";
+import { formatBytes, type CollectStatusOptions, type StatusData } from "./status.js";
 
 export interface StatusTuiProps {
   /** Collect one snapshot. `opts.runChecks` drives the probe/cert checks. */
@@ -38,6 +35,11 @@ export function StatusTui({ collect, refreshMs = 5000 }: StatusTuiProps) {
   const dataRef = useRef<StatusData | null>(null);
   dataRef.current = data;
   const inflight = useRef(false);
+  // A manual `r` pressed while a collect is in flight is deferred, not
+  // dropped: the flag records that exactly one re-run-checks refresh is owed
+  // once the in-flight collect settles. Rapid repeated `r` presses
+  // coalesce to this single flag.
+  const pendingRefresh = useRef(false);
 
   const refresh = useCallback(
     async (runChecks: boolean) => {
@@ -58,12 +60,18 @@ export function StatusTui({ collect, refreshMs = 5000 }: StatusTuiProps) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         inflight.current = false;
+        // Settle any deferred manual refresh exactly once (coalesced).
+        if (pendingRefresh.current) {
+          pendingRefresh.current = false;
+          void refresh(true).finally(() => setChecking(false));
+        }
       }
     },
     // `collect` is stable for the lifetime of the TUI (a closure over the
-    // persistent conn); refresh identity is stable so the effect below
-    // installs the interval exactly once.
-    [],
+    // persistent conn); listing it keeps the hook rule-honest while leaving
+    // refresh identity stable so the effect below installs the interval
+    // exactly once.
+    [collect],
   );
 
   const first = useRef(true);
@@ -79,8 +87,15 @@ export function StatusTui({ collect, refreshMs = 5000 }: StatusTuiProps) {
     if (input === "q") exit();
     if (key.ctrl && input === "c") exit();
     if (input === "r") {
-      setChecking(true);
-      void refresh(true).finally(() => setChecking(false));
+      if (inflight.current) {
+        // Collect in flight: defer instead of dropping. The `checking`
+        // indicator stays up until the deferred refresh completes.
+        pendingRefresh.current = true;
+        setChecking(true);
+      } else {
+        setChecking(true);
+        void refresh(true).finally(() => setChecking(false));
+      }
     }
   });
 
@@ -107,16 +122,12 @@ export function StatusTui({ collect, refreshMs = 5000 }: StatusTuiProps) {
       <Box>
         <Panel title={`Server — ${d.name}`}>
           <Text>
-            <Text dimColor>ip</Text> {d.ip}  <Text dimColor>domain</Text> {d.domain}
+            <Text dimColor>ip</Text> {d.ip} <Text dimColor>domain</Text> {d.domain}
           </Text>
           <Text>
-            <Text dimColor>xray</Text> {d.xrayVersion}  <Text dimColor>unit</Text>{" "}
-            <Text color={d.unitActive ? "green" : "red"}>
-              {d.unitActive ? "active" : "INACTIVE"}
-            </Text>
-            {d.unitUptime !== "" ? (
-              <Text dimColor> (since {d.unitUptime})</Text>
-            ) : null}
+            <Text dimColor>xray</Text> {d.xrayVersion} <Text dimColor>unit</Text>{" "}
+            <Text color={d.unitActive ? "green" : "red"}>{d.unitActive ? "active" : "INACTIVE"}</Text>
+            {d.unitUptime !== "" ? <Text dimColor> (since {d.unitUptime})</Text> : null}
           </Text>
         </Panel>
         <Panel title="Host">
@@ -159,8 +170,8 @@ export function StatusTui({ collect, refreshMs = 5000 }: StatusTuiProps) {
               <Text dimColor>not run yet (r to run)</Text>
             ) : (
               <Text>
-                {d.cert.subject} <Text dimColor>issuer</Text> {d.cert.issuer}{" "}
-                <Text dimColor>valid to</Text> {d.cert.validTo}
+                {d.cert.subject} <Text dimColor>issuer</Text> {d.cert.issuer} <Text dimColor>valid to</Text>{" "}
+                {d.cert.validTo}
               </Text>
             )}
           </Text>
@@ -176,9 +187,7 @@ export function StatusTui({ collect, refreshMs = 5000 }: StatusTuiProps) {
       </Box>
       <Box>
         <Text dimColor>{new Date(d.fetchedAt).toISOString()} </Text>
-        {error !== null ? (
-          <Text color="red"> (last refresh failed: {error})</Text>
-        ) : null}
+        {error !== null ? <Text color="red"> (last refresh failed: {error})</Text> : null}
         <Text dimColor>{checking ? " re-running checks…" : ""} q quit · r re-run checks</Text>
       </Box>
     </Box>

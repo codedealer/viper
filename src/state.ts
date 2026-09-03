@@ -57,8 +57,7 @@ function normalizeKey(value: string): string {
   }
   return value; // invalid — the caller reports it
 }
-const UUID_V4_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HEX_RE = /^[0-9a-f]+$/i;
 /** SHA256:<base64-no-padding of a 32-byte digest> — 43 base64 chars (OpenSSH format). */
 const FINGERPRINT_RE = /^SHA256:[A-Za-z0-9+/]{43}$/;
@@ -229,10 +228,7 @@ export async function ensureState(
     });
     const state: State = {
       ...existing,
-      shortId:
-        existing.shortId !== "" || config.shortId !== ""
-          ? existing.shortId
-          : generateShortId(),
+      shortId: existing.shortId !== "" || config.shortId !== "" ? existing.shortId : generateShortId(),
       clients,
     };
     // Skip the write when nothing changed: a no-op re-render must not

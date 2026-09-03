@@ -92,7 +92,7 @@ test("auto-upgrades: fresh box → changed (SFTP upload of golden content + chmo
 });
 
 test("auto-upgrades: pre-existing different content → replaced", async () => {
-  const remote = new FakeRemote({ autoUpgradesFile: "APT::Periodic::Update-Package-Lists \"0\";\n" });
+  const remote = new FakeRemote({ autoUpgradesFile: 'APT::Periodic::Update-Package-Lists "0";\n' });
   const res = await autoUpgradesStep().run(remote, ctx());
   assert.equal(res.status, "changed");
 });
@@ -233,7 +233,7 @@ test("ssh: conflicting drop-in NOT fixed by neutralize → failed with drop-in h
   assert.equal(res.status, "failed");
   assert.match(res.detail ?? "", /effective sshd setting mismatch/);
   assert.match(res.detail ?? "", /sshd_config\.d/);
-  // The neutralize loop ran twice (it did not fix the mismatch) — bounded.
+  // The neutralize loop re-ran once (it did not fix the mismatch) — bounded.
   const neutralizes = remote.commands.filter((x) => x.startsWith("for f in /etc/ssh/sshd_config.d"));
   assert.equal(neutralizes.length, 1, "re-run at most once");
   assert.ok(!remote.commands.some((x) => x.startsWith("systemctl restart")));
@@ -254,7 +254,10 @@ test("ssh: fresh box with conflicting drop-in → write + neutralize recovers", 
   });
   const res = await sshStep().run(remote, ctx());
   assert.equal(res.status, "changed");
-  assert.ok(remote.uploads.some((u) => u.remote === SSHD_DROPIN_PATH), "drop-in written");
+  assert.ok(
+    remote.uploads.some((u) => u.remote === SSHD_DROPIN_PATH),
+    "drop-in written",
+  );
 });
 
 // ------------------------------------------------------------- fail2ban
@@ -268,10 +271,7 @@ test("fail2ban: inactive → enabled + started; second run ok", async () => {
   assert.match(remote.commands.join("\n"), /systemctl restart fail2ban/);
   const second = await step.run(remote, ctx());
   assert.equal(second.status, "ok");
-  assert.equal(
-    remote.commands.filter((x) => x.startsWith("systemctl restart fail2ban")).length,
-    1,
-  );
+  assert.equal(remote.commands.filter((x) => x.startsWith("systemctl restart fail2ban")).length, 1);
 });
 
 test("fail2ban: already active → ok, zero mutations", async () => {
@@ -329,7 +329,9 @@ test("bbr: sysctls genuinely unavailable → skipped + WARNING, no persistence",
 });
 
 test("bbr: other sysctl failure → failed (not warn-swallowed)", async () => {
-  const remote = new FakeRemote({ sysctlFails: "sysctl: setting key \"net.core.default_qdisc\", ignoring: permission denied" });
+  const remote = new FakeRemote({
+    sysctlFails: 'sysctl: setting key "net.core.default_qdisc", ignoring: permission denied',
+  });
   const res = await bbrStep().run(remote, ctx());
   assert.equal(res.status, "failed");
   assert.match(res.detail ?? "", /sysctl net\.core\.default_qdisc failed/);
@@ -471,7 +473,12 @@ test("ufw: an allow fails → failed before enable", async () => {
 });
 
 test("ufw: user rules are never touched (only viper's allows issued)", async () => {
-  const remote = new FakeRemote({ ufwActive: true, ufwRules: ["3389/tcp"], ufwDefaultIn: "deny", ufwDefaultOut: "allow" });
+  const remote = new FakeRemote({
+    ufwActive: true,
+    ufwRules: ["3389/tcp"],
+    ufwDefaultIn: "deny",
+    ufwDefaultOut: "allow",
+  });
   await ufwStep().run(remote, ctx());
   const issued = remote.commands.filter((x) => x.startsWith("ufw "));
   for (const c of issued) {

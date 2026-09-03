@@ -467,9 +467,12 @@ export class FakeRemote implements SshConn {
       const f = this.files.get("/etc/sysctl.d/99-viper.conf");
       return f !== undefined ? ok(f) : fail(1, "");
     }
-    if (cmd === "sysctl -w net.core.default_qdisc=fq" || cmd === "sysctl -w net.ipv4.tcp_congestion_control=bbr") {
+    if (
+      cmd === "sysctl -w net.core.default_qdisc=fq" ||
+      cmd === "sysctl -w net.ipv4.tcp_congestion_control=bbr"
+    ) {
       if (this.opts.sysctlUnavailable) {
-        return fail(255, "sysctl: cannot stat \"/proc/sys/net/core/default_qdisc\": No such file or directory");
+        return fail(255, 'sysctl: cannot stat "/proc/sys/net/core/default_qdisc": No such file or directory');
       }
       if (this.opts.sysctlFails !== undefined) return fail(255, this.opts.sysctlFails);
       const key = cmd.slice("sysctl -w ".length).split("=")[0] as string;
@@ -487,7 +490,10 @@ export class FakeRemote implements SshConn {
       // Plain `ufw status` on real Ubuntu 24.04: rule table (incl. v6)
       // but NO Default/Logging lines — the live run-2 anomaly root
       // cause (captured 2026-08-31, see live_verification.md).
-      const rules = [...this.ufwRules].sort().map((r) => `${r}                     ALLOW IN    Anywhere`).join("\n");
+      const rules = [...this.ufwRules]
+        .sort()
+        .map((r) => `${r}                     ALLOW IN    Anywhere`)
+        .join("\n");
       return ok(
         "Status: active\n\n" +
           "To                         Action      From\n--                         ------      ----\n" +
@@ -551,22 +557,30 @@ export class FakeRemote implements SshConn {
       return ok(`Xray ${this.opts.xrayVersion ?? "26.3.27"} (Xray, Penetrates Everything) viper-fake\n`);
     }
     if (cmd === "mkdir -p /tmp/viper-xray") return ok();
-    if (cmd.startsWith("curl -fsSL --max-time 300 ") && cmd.endsWith("-o /tmp/viper-xray/Xray-linux-64.zip")) {
+    if (
+      cmd.startsWith("curl -fsSL --max-time 300 ") &&
+      cmd.endsWith("-o /tmp/viper-xray/Xray-linux-64.zip")
+    ) {
       this.zipDownloaded = true;
       return ok();
     }
-    if (cmd.startsWith("curl -fsSL --max-time 60 ") && cmd.endsWith("-o /tmp/viper-xray/Xray-linux-64.zip.dgst")) {
+    if (
+      cmd.startsWith("curl -fsSL --max-time 60 ") &&
+      cmd.endsWith("-o /tmp/viper-xray/Xray-linux-64.zip.dgst")
+    ) {
       if (this.opts.dgstMissing) return fail(22, "curl: (22) The requested URL returned error: 404");
       this.dgstDownloaded = true;
       return ok();
     }
     if (cmd === "grep '^SHA2-256=' /tmp/viper-xray/Xray-linux-64.zip.dgst | awk '{print $2}'") {
-      if (!this.dgstDownloaded) return fail(2, "grep: /tmp/viper-xray/Xray-linux-64.zip.dgst: No such file or directory");
+      if (!this.dgstDownloaded)
+        return fail(2, "grep: /tmp/viper-xray/Xray-linux-64.zip.dgst: No such file or directory");
       // The real v26.3.27 asset digest (captured from the GitHub release).
       return ok("23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae\n");
     }
     if (cmd === "sha256sum /tmp/viper-xray/Xray-linux-64.zip | awk '{print $1}'") {
-      if (!this.zipDownloaded) return fail(1, "sha256sum: /tmp/viper-xray/Xray-linux-64.zip: No such file or directory");
+      if (!this.zipDownloaded)
+        return fail(1, "sha256sum: /tmp/viper-xray/Xray-linux-64.zip: No such file or directory");
       const hex = this.opts.sha256Mismatch
         ? "0000000000000000000000000000000000000000000000000000000000000000"
         : "23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae";
@@ -574,29 +588,34 @@ export class FakeRemote implements SshConn {
     }
     if (cmd === "cd /tmp/viper-xray && unzip -o Xray-linux-64.zip") {
       if (!this.unzipInstalled) return fail(127, "sh: 1: unzip: not found");
-      if (!this.zipDownloaded) return fail(9, "unzip:  cannot find zipfile directory in what was specified on command line");
+      if (!this.zipDownloaded)
+        return fail(9, "unzip:  cannot find zipfile directory in what was specified on command line");
       this.extracted = true;
       return ok("Archive:  Xray-linux-64.zip\n");
     }
     if (cmd === "mkdir -p /usr/local/share/xray") return ok();
     if (cmd === "cp /tmp/viper-xray/xray /usr/local/bin/xray") {
-      if (!this.extracted) return fail(1, "cp: cannot stat '/tmp/viper-xray/xray': No such file or directory");
+      if (!this.extracted)
+        return fail(1, "cp: cannot stat '/tmp/viper-xray/xray': No such file or directory");
       this.xrayInstalled = true;
       return ok();
     }
     if (cmd === "chmod 755 /usr/local/bin/xray") return ok();
     if (cmd === "cp /tmp/viper-xray/geoip.dat /usr/local/share/xray/geoip.dat") {
-      if (!this.extracted) return fail(1, "cp: cannot stat '/tmp/viper-xray/geoip.dat': No such file or directory");
+      if (!this.extracted)
+        return fail(1, "cp: cannot stat '/tmp/viper-xray/geoip.dat': No such file or directory");
       this.geoFiles.add("geoip.dat");
       return ok();
     }
     if (cmd === "cp /tmp/viper-xray/geosite.dat /usr/local/share/xray/geosite.dat") {
-      if (!this.extracted) return fail(1, "cp: cannot stat '/tmp/viper-xray/geosite.dat': No such file or directory");
+      if (!this.extracted)
+        return fail(1, "cp: cannot stat '/tmp/viper-xray/geosite.dat': No such file or directory");
       this.geoFiles.add("geosite.dat");
       return ok();
     }
     if (cmd === "ls /usr/local/share/xray 2>/dev/null") {
-      if (this.geoFiles.size === 0 && !this.xrayInstalled) return fail(2, "ls: cannot access '/usr/local/share/xray': No such file or directory");
+      if (this.geoFiles.size === 0 && !this.xrayInstalled)
+        return fail(2, "ls: cannot access '/usr/local/share/xray': No such file or directory");
       return ok([...this.geoFiles].sort().join("\n") + "\n");
     }
     if (cmd === "cat /etc/systemd/system/xray.service 2>/dev/null") {
@@ -646,7 +665,8 @@ export class FakeRemote implements SshConn {
     }
     if (cmd === "mv /etc/xray/config.new.json /etc/xray/config.json") {
       const tmp = this.files.get("/etc/xray/config.new.json");
-      if (tmp === undefined) return fail(1, "mv: cannot stat '/etc/xray/config.new.json': No such file or directory");
+      if (tmp === undefined)
+        return fail(1, "mv: cannot stat '/etc/xray/config.new.json': No such file or directory");
       this.files.set("/etc/xray/config.json", tmp);
       this.files.delete("/etc/xray/config.new.json");
       return ok();
@@ -655,7 +675,8 @@ export class FakeRemote implements SshConn {
       if (!this.files.has("/etc/systemd/system/xray.service")) {
         return fail(3, "Unit xray.service not found.");
       }
-      if (this.opts.xrayRestartFails) return fail(1, "Job for xray.service failed because the control process exited with error code.");
+      if (this.opts.xrayRestartFails)
+        return fail(1, "Job for xray.service failed because the control process exited with error code.");
       this.xrayActive = !this.opts.xrayStaysInactive;
       return ok();
     }
@@ -676,7 +697,10 @@ export class FakeRemote implements SshConn {
       if (this.opts.xrayTestClientFails !== undefined) return fail(2, this.opts.xrayTestClientFails);
       return ok();
     }
-    if (cmd === "(cd /usr/local/share/xray && exec nohup xray run -c /tmp/viper-probe/config.json > /tmp/viper-probe/xray.log 2>&1 < /dev/null) & echo $!") {
+    if (
+      cmd ===
+      "(cd /usr/local/share/xray && exec nohup xray run -c /tmp/viper-probe/config.json > /tmp/viper-probe/xray.log 2>&1 < /dev/null) & echo $!"
+    ) {
       if (!this.xrayInstalled) {
         this.probeRunning = false;
         this.probeLog = "nohup: failed to run command 'xray': No such file or directory";
@@ -684,7 +708,8 @@ export class FakeRemote implements SshConn {
       }
       if (this.opts.probeComesUp === false) {
         this.probeRunning = false;
-        this.probeLog = "Xray 26.3.27 (Xray, Penetrates Everything) viper-fake\nError: listen tcp 127.0.0.1:10809: bind: address already in use";
+        this.probeLog =
+          "Xray 26.3.27 (Xray, Penetrates Everything) viper-fake\nError: listen tcp 127.0.0.1:10809: bind: address already in use";
         return ok("12345\n");
       }
       this.probeRunning = true;
@@ -708,7 +733,10 @@ export class FakeRemote implements SshConn {
     if (cmd === "rm -rf /tmp/viper-probe") return ok();
 
     // --- xray teardown (M5) ---
-    if (cmd === "test -f /usr/local/bin/xray || test -f /etc/systemd/system/xray.service || test -f /etc/xray/config.json") {
+    if (
+      cmd ===
+      "test -f /usr/local/bin/xray || test -f /etc/systemd/system/xray.service || test -f /etc/xray/config.json"
+    ) {
       const present =
         this.xrayInstalled ||
         this.files.has("/etc/systemd/system/xray.service") ||
@@ -763,19 +791,29 @@ export class FakeRemote implements SshConn {
       this.crontabHasAcme = true;
       return ok("The cron job had been installed for auto renewal.\n");
     }
-    if (/^\/root\/\.acme\.sh\/acme\.sh --issue -d \S+ --server letsencrypt --webroot \/var\/www\/acme --keylength 2048 2>&1$/.test(cmd)) {
+    if (
+      /^\/root\/\.acme\.sh\/acme\.sh --issue -d \S+ --server letsencrypt --webroot \/var\/www\/acme --keylength 2048 2>&1$/.test(
+        cmd,
+      )
+    ) {
       if (this.opts.acmeIssueRc !== undefined) {
         if (this.opts.acmeIssueRc === 0) this.certIssued = true;
         return { stdout: "[Issue] ok\n", stderr: "", code: this.opts.acmeIssueRc };
       }
       if (!this.certIssued) {
         this.certIssued = true;
-        return ok("[Issue] Account updated.\n[Issue] ACME server validated our request.\n[issuance] Success\n");
+        return ok(
+          "[Issue] Account updated.\n[Issue] ACME server validated our request.\n[issuance] Success\n",
+        );
       }
       // acme.sh rc 2: existing cert still valid — skip renewal.
       return { stdout: "The cert is still valid, no need to renew.\n", stderr: "", code: 2 };
     }
-    if (/^\/root\/\.acme\.sh\/acme\.sh --install-cert -d \S+ --key-file \/etc\/nginx\/ssl\/\S+\/privkey\.pem --fullchain-file \/etc\/nginx\/ssl\/\S+\/fullchain\.pem --reloadcmd "systemctl reload nginx" 2>&1$/.test(cmd)) {
+    if (
+      /^\/root\/\.acme\.sh\/acme\.sh --install-cert -d \S+ --key-file \/etc\/nginx\/ssl\/\S+\/privkey\.pem --fullchain-file \/etc\/nginx\/ssl\/\S+\/fullchain\.pem --reloadcmd "systemctl reload nginx" 2>&1$/.test(
+        cmd,
+      )
+    ) {
       if (this.opts.installCertFails !== undefined) return fail(1, this.opts.installCertFails);
       if (!this.certIssued) return fail(1, "Can not find the cert for this domain");
       // Copies acme.sh's stored cert into place; the md5 is stable so an
@@ -785,17 +823,23 @@ export class FakeRemote implements SshConn {
     }
 
     // --- nginx vhosts (M6) ---
-    if (cmd === "cat /etc/nginx/sites-available/viper-acme.conf 2>/dev/null" ||
-        cmd === "cat /etc/nginx/sites-available/viper-web.conf 2>/dev/null") {
+    if (
+      cmd === "cat /etc/nginx/sites-available/viper-acme.conf 2>/dev/null" ||
+      cmd === "cat /etc/nginx/sites-available/viper-web.conf 2>/dev/null"
+    ) {
       const f = this.files.get(cmd.slice("cat ".length, -" 2>/dev/null".length));
       return f !== undefined ? ok(f) : fail(1, "");
     }
-    if (cmd === "test -L /etc/nginx/sites-enabled/viper-acme.conf" ||
-        cmd === "test -L /etc/nginx/sites-enabled/viper-web.conf") {
+    if (
+      cmd === "test -L /etc/nginx/sites-enabled/viper-acme.conf" ||
+      cmd === "test -L /etc/nginx/sites-enabled/viper-web.conf"
+    ) {
       return this.symlinks.has(cmd.slice("test -L ".length)) ? ok() : fail(1, "");
     }
-    if (cmd === "ln -sf /etc/nginx/sites-available/viper-acme.conf /etc/nginx/sites-enabled/viper-acme.conf" ||
-        cmd === "ln -sf /etc/nginx/sites-available/viper-web.conf /etc/nginx/sites-enabled/viper-web.conf") {
+    if (
+      cmd === "ln -sf /etc/nginx/sites-available/viper-acme.conf /etc/nginx/sites-enabled/viper-acme.conf" ||
+      cmd === "ln -sf /etc/nginx/sites-available/viper-web.conf /etc/nginx/sites-enabled/viper-web.conf"
+    ) {
       this.symlinks.add(cmd.split(" ")[3] as string);
       return ok();
     }
@@ -830,9 +874,7 @@ export class FakeRemote implements SshConn {
         return this.deployedCertMd5 !== undefined ? ok(`${this.deployedCertMd5}  ${p}\n`) : fail(1, "");
       }
       const f = this.files.get(p);
-      return f !== undefined
-        ? ok(`${createHash("md5").update(f).digest("hex")}  ${p}\n`)
-        : fail(1, "");
+      return f !== undefined ? ok(`${createHash("md5").update(f).digest("hex")}  ${p}\n`) : fail(1, "");
     }
 
     // --- public web path (M6 verifies, D8: curl --resolve <domain>:443:<ip>) ---
@@ -920,7 +962,11 @@ export class FakeRemote implements SshConn {
       }
       return ok("2026-09-01 01:00:00.000000000 +0000\n");
     }
-    if (/^echo \| openssl s_client -connect \S+:443 -servername \S+ 2>\/dev\/null \| openssl x509 -noout -subject -issuer -enddate$/.test(cmd)) {
+    if (
+      /^echo \| openssl s_client -connect \S+:443 -servername \S+ 2>\/dev\/null \| openssl x509 -noout -subject -issuer -enddate$/.test(
+        cmd,
+      )
+    ) {
       if (!this.certIssued) return fail(1, "");
       return ok(
         `subject=${this.opts.certSubject ?? "CN = viper.example"}\n` +
@@ -930,20 +976,30 @@ export class FakeRemote implements SshConn {
     }
 
     // --- cert borrow probe (M6 verify-cert) ---
-    if (/^echo \| openssl s_client -connect \S+:443 -servername \S+ 2>\/dev\/null \| openssl x509 -noout -issuer$/.test(cmd)) {
+    if (
+      /^echo \| openssl s_client -connect \S+:443 -servername \S+ 2>\/dev\/null \| openssl x509 -noout -issuer$/.test(
+        cmd,
+      )
+    ) {
       return this.certIssued
         ? ok("issuer=C = US, O = Let's Encrypt, CN = R3\n")
         : ok("issuer=CN = viper bootstrap self-signed\n");
     }
 
     // --- nginx/acme teardown (M6) ---
-    if (cmd === "test -f /etc/nginx/sites-available/viper-acme.conf || test -f /etc/nginx/sites-available/viper-web.conf") {
+    if (
+      cmd ===
+      "test -f /etc/nginx/sites-available/viper-acme.conf || test -f /etc/nginx/sites-available/viper-web.conf"
+    ) {
       return this.files.has("/etc/nginx/sites-available/viper-acme.conf") ||
-             this.files.has("/etc/nginx/sites-available/viper-web.conf")
+        this.files.has("/etc/nginx/sites-available/viper-web.conf")
         ? ok()
         : fail(1, "");
     }
-    if (cmd === "rm -f /etc/nginx/sites-available/viper-acme.conf /etc/nginx/sites-available/viper-web.conf /etc/nginx/sites-enabled/viper-acme.conf /etc/nginx/sites-enabled/viper-web.conf") {
+    if (
+      cmd ===
+      "rm -f /etc/nginx/sites-available/viper-acme.conf /etc/nginx/sites-available/viper-web.conf /etc/nginx/sites-enabled/viper-acme.conf /etc/nginx/sites-enabled/viper-web.conf"
+    ) {
       this.files.delete("/etc/nginx/sites-available/viper-acme.conf");
       this.files.delete("/etc/nginx/sites-available/viper-web.conf");
       this.symlinks.delete("/etc/nginx/sites-enabled/viper-acme.conf");
@@ -960,12 +1016,14 @@ export class FakeRemote implements SshConn {
     const testDirs = cmd.match(/^test -d (\S+) \\|\\| test -d (\S+) \\|\\| test -d (\S+)$/);
     if (testDirs !== null) {
       return this.dirs.has(testDirs[1] as string) ||
-             this.dirs.has(testDirs[2] as string) ||
-             this.dirs.has(testDirs[3] as string)
+        this.dirs.has(testDirs[2] as string) ||
+        this.dirs.has(testDirs[3] as string)
         ? ok()
         : fail(1, "");
     }
-    const rmDirs = cmd.match(/^rm -rf (\/var\/www\/\S+|\/etc\/nginx\/ssl\/\S+) (\/var\/www\/\S+|\/etc\/nginx\/ssl\/\S+) (\/var\/www\/\S+|\/etc\/nginx\/ssl\/\S+)$/);
+    const rmDirs = cmd.match(
+      /^rm -rf (\/var\/www\/\S+|\/etc\/nginx\/ssl\/\S+) (\/var\/www\/\S+|\/etc\/nginx\/ssl\/\S+) (\/var\/www\/\S+|\/etc\/nginx\/ssl\/\S+)$/,
+    );
     if (rmDirs !== null) {
       for (const p of [rmDirs[1], rmDirs[2], rmDirs[3]]) {
         const dir = p as string;

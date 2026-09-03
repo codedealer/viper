@@ -48,10 +48,9 @@ export function xrayDeployStep(pollOpts: PollOptions = {}): Step {
       await uploadRendered(conn, rendered, XRAY_CONFIG_TMP, "config.new.json");
 
       // Validate the NEW config before touching the live one.
-      const test = await conn.run(
-        `cd /usr/local/share/xray && xray -test -c ${XRAY_CONFIG_TMP}`,
-        { timeoutMs: 60_000 },
-      );
+      const test = await conn.run(`cd /usr/local/share/xray && xray -test -c ${XRAY_CONFIG_TMP}`, {
+        timeoutMs: 60_000,
+      });
       if (test.code !== 0) {
         await conn.run(`rm -f ${XRAY_CONFIG_TMP}`, { timeoutMs: 10_000 });
         // xray logs config errors to stdout (not stderr) — include both.
@@ -74,7 +73,8 @@ export function xrayDeployStep(pollOpts: PollOptions = {}): Step {
       }
 
       const active = await poll(
-        async () => (await conn.run("systemctl is-active xray", { timeoutMs: 10_000 })).stdout.trim() === "active",
+        async () =>
+          (await conn.run("systemctl is-active xray", { timeoutMs: 10_000 })).stdout.trim() === "active",
         pollOpts,
       );
       if (!active) {

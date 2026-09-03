@@ -56,8 +56,7 @@ export function noRecordOrRethrow(err: unknown): string[] | never {
  * message); other failures (network down, resolver error, `EAI_AGAIN`)
  * throw and are reported distinctly by the preflight step.
  */
-export const defaultDnsResolver: DnsResolver = (domain) =>
-  resolve4(domain).catch(noRecordOrRethrow);
+export const defaultDnsResolver: DnsResolver = (domain) => resolve4(domain).catch(noRecordOrRethrow);
 
 /**
  * Parse sshd port(s) from command output (Meridian's _parse_ssh_ports
@@ -87,7 +86,7 @@ export function parsePorts(output: string): number[] {
  */
 export async function detectSshdPorts(conn: SshConn): Promise<number[]> {
   const commands = [
-    'sshd -T 2>/dev/null | awk \'$1 == "port" {print $2}\'',
+    "sshd -T 2>/dev/null | awk '$1 == \"port\" {print $2}'",
     "grep -hEi '^[[:space:]]*Port[[:space:]]+[0-9]+' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null | awk '{print $2}'",
   ];
   for (const cmd of commands) {
@@ -136,10 +135,7 @@ export interface PollOptions {
  * Default: 10 attempts, 1000 ms apart (the M5 post-restart contract
  * values); tests inject smaller intervals.
  */
-export async function poll(
-  fn: () => Promise<boolean>,
-  opts: PollOptions = {},
-): Promise<boolean> {
+export async function poll(fn: () => Promise<boolean>, opts: PollOptions = {}): Promise<boolean> {
   const attempts = opts.attempts ?? 10;
   const intervalMs = opts.intervalMs ?? 1000;
   for (let i = 0; i < attempts; i++) {

@@ -31,10 +31,7 @@ test("pure: pinnedVersion strips leading v", () => {
 });
 
 test("pure: parseXrayVersion", () => {
-  assert.equal(
-    parseXrayVersion("Xray 26.3.27 (Xray, Penetrates Everything) abc123\n"),
-    "26.3.27",
-  );
+  assert.equal(parseXrayVersion("Xray 26.3.27 (Xray, Penetrates Everything) abc123\n"), "26.3.27");
   assert.equal(parseXrayVersion("garbage"), undefined);
 });
 
@@ -76,9 +73,11 @@ test("install: fresh box without unzip — installs + records unzip", async () =
   const remote = new FakeRemote({ unzipInstalled: false });
   const c = ctx();
   const persisted: State[] = [];
-  const res = await xrayInstallStep({ persistState: (s) => {
-    persisted.push(s);
-  } }).run(remote, c);
+  const res = await xrayInstallStep({
+    persistState: (s) => {
+      persisted.push(s);
+    },
+  }).run(remote, c);
   assert.equal(res.status, "changed");
   assert.ok(remote.commands.some((x) => x.includes("apt-get install -y -qq unzip")));
   assert.deepEqual(c.state.installedPackages, ["unzip"]);
@@ -123,7 +122,11 @@ test("install: unit present but stale — re-upload + reload + enable", async ()
 });
 
 test("install: pinned version but geo assets missing — re-download + repair", async () => {
-  const remote = new FakeRemote({ xrayInstalled: true, xrayGeoMissing: true, xrayUnitFile: renderXrayUnit() });
+  const remote = new FakeRemote({
+    xrayInstalled: true,
+    xrayGeoMissing: true,
+    xrayUnitFile: renderXrayUnit(),
+  });
   const res = await xrayInstallStep().run(remote, ctx());
   assert.equal(res.status, "changed");
   assert.ok(remote.commands.includes("cp /tmp/viper-xray/geoip.dat /usr/local/share/xray/geoip.dat"));

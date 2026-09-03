@@ -61,8 +61,7 @@ export function assertValidIpv4(ip: string, path: string): void {
 const XRAY_PIN_RE = /^v\d+\.\d+\.\d+$/;
 /** Reality shortId: 0–16 hex chars, even length (Xray reality docs). */
 export const SHORT_ID_RE = /^(?:[0-9a-f]{2}){0,8}$/i;
-const DOMAIN_RE =
-  /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
+const DOMAIN_RE = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 
 const FINGERPRINTS = new Set([
   "chrome",
@@ -89,11 +88,7 @@ function asRecord(value: unknown, path: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function stringField(
-  doc: Record<string, unknown>,
-  key: string,
-  path: string,
-): string {
+function stringField(doc: Record<string, unknown>, key: string, path: string): string {
   const value = doc[key];
   if (typeof value !== "string" || value.length === 0) {
     fail(`${path}.${key}`, "expected a non-empty string");
@@ -101,11 +96,7 @@ function stringField(
   return value;
 }
 
-function optionalStringField(
-  doc: Record<string, unknown>,
-  key: string,
-  path: string,
-): string | undefined {
+function optionalStringField(doc: Record<string, unknown>, key: string, path: string): string | undefined {
   const value = doc[key];
   if (value === undefined) return undefined;
   if (typeof value !== "string" || value.length === 0) {
@@ -133,12 +124,7 @@ function intField(
   return value;
 }
 
-function boolField(
-  doc: Record<string, unknown>,
-  key: string,
-  path: string,
-  def: boolean,
-): boolean {
+function boolField(doc: Record<string, unknown>, key: string, path: string, def: boolean): boolean {
   const value = doc[key];
   if (value === undefined) return def;
   if (typeof value !== "boolean") fail(`${path}.${key}`, "expected a boolean");
@@ -155,18 +141,12 @@ function enumField(
   const value = doc[key];
   if (value === undefined) return def;
   if (typeof value !== "string" || !allowed.has(value)) {
-    fail(
-      `${path}.${key}`,
-      `expected one of: ${[...allowed].sort().join(", ")}`,
-    );
+    fail(`${path}.${key}`, `expected one of: ${[...allowed].sort().join(", ")}`);
   }
   return value;
 }
 
-function parseClients(
-  value: unknown,
-  path: string,
-): ClientConfig[] {
+function parseClients(value: unknown, path: string): ClientConfig[] {
   if (!Array.isArray(value) || value.length === 0) {
     fail(`${path}.clients`, "expected a non-empty list of clients");
   }
@@ -187,10 +167,7 @@ function parseClients(
 }
 
 /** Parse + validate a `viper.<name>.yml` document, applying defaults. */
-export function parseServerConfig(
-  name: string,
-  doc: unknown,
-): ServerConfig {
+export function parseServerConfig(name: string, doc: unknown): ServerConfig {
   const root = `viper.${name}.yml`;
   const d = asRecord(doc, root);
 
@@ -230,18 +207,12 @@ export function parseServerConfig(
 
   const xray = stringField(d, "xray", root);
   if (!XRAY_PIN_RE.test(xray)) {
-    fail(
-      `${root}.xray`,
-      `"${xray}" is not a valid version pin (expected e.g. v26.3.27)`,
-    );
+    fail(`${root}.xray`, `"${xray}" is not a valid version pin (expected e.g. v26.3.27)`);
   }
 
   const shortId = optionalStringField(d, "shortId", root) ?? "";
   if (!SHORT_ID_RE.test(shortId)) {
-    fail(
-      `${root}.shortId`,
-      `"${shortId}" is not valid (0–16 hex chars, even length; omit for auto)`,
-    );
+    fail(`${root}.shortId`, `"${shortId}" is not valid (0–16 hex chars, even length; omit for auto)`);
   }
 
   const maxTimediff = intField(d, "maxTimediff", root, 0, Number.MAX_SAFE_INTEGER, 0);
@@ -274,16 +245,12 @@ export function parseServerConfig(
  * Load every `viper.<name>.yml` in the project directory.
  * Returns a map of name → validated config.
  */
-export async function loadServers(
-  projectDir: string,
-): Promise<Map<string, ServerConfig>> {
+export async function loadServers(projectDir: string): Promise<Map<string, ServerConfig>> {
   let entries: string[];
   try {
     entries = await readdir(projectDir);
   } catch (err) {
-    throw new ConfigError(
-      `config: cannot read project directory "${projectDir}": ${(err as Error).message}`,
-    );
+    throw new ConfigError(`config: cannot read project directory "${projectDir}": ${(err as Error).message}`);
   }
   const servers = new Map<string, ServerConfig>();
   for (const entry of entries.sort()) {
@@ -313,16 +280,11 @@ export async function loadServers(
  * - otherwise the sole server is used,
  * - otherwise a clear error (none found / multiple servers).
  */
-export function resolveServerName(
-  requested: string | undefined,
-  servers: Map<string, ServerConfig>,
-): string {
+export function resolveServerName(requested: string | undefined, servers: Map<string, ServerConfig>): string {
   if (requested !== undefined) {
     if (!servers.has(requested)) {
       const known = [...servers.keys()].sort().join(", ") || "(none)";
-      throw new ConfigError(
-        `config: no server named "${requested}" (available: ${known})`,
-      );
+      throw new ConfigError(`config: no server named "${requested}" (available: ${known})`);
     }
     return requested;
   }

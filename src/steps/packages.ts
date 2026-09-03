@@ -24,8 +24,7 @@ export function packagesStep(opts: HardeningStepOptions = {}): Step {
        * the parser below would never recognize anything as installed and
        * would re-install every run.
        */
-      const checkCmd =
-        "dpkg-query -W --showformat='${Package} ${Status}\\n' " + REQUIRED_PACKAGES.join(" ");
+      const checkCmd = "dpkg-query -W --showformat='${Package} ${Status}\\n' " + REQUIRED_PACKAGES.join(" ");
       const check = await conn.run(checkCmd, { timeoutMs: 15_000 });
 
       // dpkg-query exits non-zero when ANY package is missing (and prints

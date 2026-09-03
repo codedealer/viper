@@ -96,7 +96,8 @@ class FakeClient {
   hostKeyBlob: Buffer | null = null;
 
   on(event: string, h: (...a: unknown[]) => void) {
-    (this.handlers[event] ??= []).push(h);
+    this.handlers[event] = this.handlers[event] ?? [];
+    this.handlers[event].push(h);
     return this;
   }
   connect(config: Record<string, unknown>) {
@@ -117,7 +118,8 @@ class FakeClient {
   }
   sftp(cb: (err: Error | null, sftp?: FakeSftp) => void) {
     this.sftpCalls++;
-    cb(null, (this.sftpSession = this.sftpSession ?? new FakeSftp()));
+    this.sftpSession = this.sftpSession ?? new FakeSftp();
+    cb(null, this.sftpSession);
   }
   // --- test drivers ---
   emitReady() {
@@ -205,10 +207,7 @@ test("command timeout: session killed, actionable error names the command, NOT r
   const { conn, clients } = await harness();
   const c = clients[0] as FakeClient;
   c.execBehavior = (_cl, _cmd, cb) => cb(null, new FakeStream()); // never closes
-  await assert.rejects(
-    conn.run("long-job", { timeoutMs: 100 }),
-    /command timed out after 100ms: long-job/,
-  );
+  await assert.rejects(conn.run("long-job", { timeoutMs: 100 }), /command timed out after 100ms: long-job/);
   assert.ok(c.ended >= 1, "timeout kills the session");
   assert.equal(clients.length, 1, "a timed-out command is not retried");
   await conn.close();
@@ -399,8 +398,7 @@ test("hostKeyFingerprint: SHA256:<base64-no-padding> of the raw host-key blob (O
   // the engine pins the real ssh2 surface: a hostVerifier in the connect config
   const config = (clients[0] as FakeClient).connectConfig as Record<string, unknown>;
   assert.equal(typeof config.hostVerifier, "function");
-  const expected =
-    "SHA256:" + createHash("sha256").update(blob).digest("base64").replace(/=+$/, "");
+  const expected = "SHA256:" + createHash("sha256").update(blob).digest("base64").replace(/=+$/, "");
   assert.equal(conn.hostKeyFingerprint(), expected);
   await conn.close();
   assert.equal(conn.hostKeyFingerprint(), undefined, "no client after close");

@@ -8,7 +8,7 @@ export default defineConfig({
       formats: ["es"],
       fileName: "index",
     },
-    "target": "node24",
+    target: "node24",
     outDir: "dist",
     minify: false,
     sourcemap: true,

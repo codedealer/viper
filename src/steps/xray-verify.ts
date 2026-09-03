@@ -39,9 +39,7 @@ export function xrayUnitActiveStep(): Step {
 
 /** True when any `ss -tln` local-address token ends in `:<port>`. */
 function isListening(stdout: string, port: number): boolean {
-  return stdout
-    .split("\n")
-    .some((line) => line.split(/\s+/).some((tok) => tok.endsWith(`:${port}`)));
+  return stdout.split("\n").some((line) => line.split(/\s+/).some((tok) => tok.endsWith(`:${port}`)));
 }
 
 export function xrayListeningStep(): Step {
@@ -68,10 +66,9 @@ export function xrayHandshakeProbeStep(pollOpts: PollOptions = {}): Step {
       // launch that timed out before the pid was captured) so its
       // SOCKS port is free for the first client. The [c] bracket keeps
       // pkill from matching its own wrapping shell.
-      await conn.run(
-        `pkill -f 'xray run -c ${PROBE_DIR}/[c]onfig.json' 2>/dev/null || true`,
-        { timeoutMs: 10_000 },
-      );
+      await conn.run(`pkill -f 'xray run -c ${PROBE_DIR}/[c]onfig.json' 2>/dev/null || true`, {
+        timeoutMs: 10_000,
+      });
 
       // Probe EVERY client, not just clients[0]: each client's uuid is
       // the credential a real client will present, so every one gets its
@@ -113,10 +110,9 @@ async function runClientProbe(
 
     // Validate the probe client config before running it: a config
     // error must not be mistaken for a handshake failure.
-    const test = await conn.run(
-      `cd /usr/local/share/xray && xray -test -c ${PROBE_DIR}/config.json`,
-      { timeoutMs: 60_000 },
-    );
+    const test = await conn.run(`cd /usr/local/share/xray && xray -test -c ${PROBE_DIR}/config.json`, {
+      timeoutMs: 60_000,
+    });
     if (test.code !== 0) {
       // xray logs config errors to stdout (not stderr) — include both.
       return {
@@ -144,8 +140,7 @@ async function runClientProbe(
     }
 
     const up = await poll(
-      async () =>
-        isListening((await conn.run("ss -tln", { timeoutMs: 10_000 })).stdout, PROBE_SOCKS_PORT),
+      async () => isListening((await conn.run("ss -tln", { timeoutMs: 10_000 })).stdout, PROBE_SOCKS_PORT),
       { attempts: 10, intervalMs: 500, ...pollOpts },
     );
     if (!up) {

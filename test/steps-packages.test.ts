@@ -98,7 +98,9 @@ test("packages: partially present — installs only the missing ones", async () 
 });
 
 test("packages: apt-get update fails → failed, no install attempted", async () => {
-  const remote = new FakeRemote({ aptUpdateFails: "W: Failed to fetch http://archive.ubuntu.com/ubuntu/dists/noble/InRelease 404 Not Found" });
+  const remote = new FakeRemote({
+    aptUpdateFails: "W: Failed to fetch http://archive.ubuntu.com/ubuntu/dists/noble/InRelease 404 Not Found",
+  });
   const c = ctx();
   const res = await runStep(remote, c);
   assert.equal(res.status, "failed");

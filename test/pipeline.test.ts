@@ -59,9 +59,7 @@ test("deploySteps: full pipeline order (contract D1)", () => {
 });
 
 test("deploySteps: harden:false drops the hardening steps, bbr:false drops bbr", () => {
-  const noHarden = names(
-    deploySteps(ctx, { ...fixtureConfig, harden: false }, {}),
-  );
+  const noHarden = names(deploySteps(ctx, { ...fixtureConfig, harden: false }, {}));
   for (const dropped of [
     "Set timezone to UTC",
     "Enable automatic security updates",
@@ -126,12 +124,17 @@ test("deploySteps: full pipeline run twice — run 2 idempotent (R11.3)", async 
     artifacts: {},
   };
 
-  const report1 = await runSteps(deploySteps(c, fixtureConfig, {
-    heroBase64: "aGVsbG8=",
-    dnsResolver: async () => [fixtureConfig.ip],
-  }), remote, c, {
-    quiet: true,
-  });
+  const report1 = await runSteps(
+    deploySteps(c, fixtureConfig, {
+      heroBase64: "aGVsbG8=",
+      dnsResolver: async () => [fixtureConfig.ip],
+    }),
+    remote,
+    c,
+    {
+      quiet: true,
+    },
+  );
   assert.equal(report1.failed, false, `run 1 failed: ${JSON.stringify(report1.results)}`);
 
   const mutBefore = remote.mutatingCommands().length;

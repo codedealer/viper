@@ -57,10 +57,7 @@ test("explicit knobs are honored", () => {
     xver: 1,
     logLevel: "error",
     sniffing: false,
-    clients: [
-      { name: "default", limitIp: 2 },
-      { name: "phone" },
-    ],
+    clients: [{ name: "default", limitIp: 2 }, { name: "phone" }],
   });
   assert.equal(cfg.sshPort, 2222);
   assert.equal(cfg.sshKey, "~/.ssh/id_ed25519");
@@ -90,44 +87,19 @@ test("harden/bbr knobs default true and honor explicit false", () => {
 function expectConfigError(doc: unknown, name: string, fragment: string): void {
   assert.throws(
     () => parseServerConfig(name, doc),
-    (err: unknown) =>
-      err instanceof ConfigError && err.message.includes(fragment),
+    (err: unknown) => err instanceof ConfigError && err.message.includes(fragment),
     `expected error containing "${fragment}"`,
   );
 }
 
 test("validation rejects bad values with actionable messages", () => {
   expectConfigError({ ...validDoc, domain: "nope" }, "main", "not a valid domain");
-  expectConfigError(
-    { ...validDoc, ip: "300.1.2.3" },
-    "main",
-    "not a valid IPv4 address",
-  );
-  expectConfigError(
-    { ...validDoc, xray: "26.3.27" },
-    "main",
-    "not a valid version pin",
-  );
-  expectConfigError(
-    { ...validDoc, unknown: true },
-    "main",
-    "unknown key",
-  );
-  expectConfigError(
-    { ...validDoc, fingerprint: "safari2" },
-    "main",
-    "expected one of",
-  );
-  expectConfigError(
-    { ...validDoc, port: 0 },
-    "main",
-    "between 1 and 65535",
-  );
-  expectConfigError(
-    { ...validDoc, shortId: "xyz" },
-    "main",
-    "shortId",
-  );
+  expectConfigError({ ...validDoc, ip: "300.1.2.3" }, "main", "not a valid IPv4 address");
+  expectConfigError({ ...validDoc, xray: "26.3.27" }, "main", "not a valid version pin");
+  expectConfigError({ ...validDoc, unknown: true }, "main", "unknown key");
+  expectConfigError({ ...validDoc, fingerprint: "safari2" }, "main", "expected one of");
+  expectConfigError({ ...validDoc, port: 0 }, "main", "between 1 and 65535");
+  expectConfigError({ ...validDoc, shortId: "xyz" }, "main", "shortId");
   expectConfigError(
     { ...validDoc, shortId: "abcde" },
     "main",
@@ -144,11 +116,7 @@ test("validation rejects bad values with actionable messages", () => {
     parseServerConfig("main", { ...validDoc, shortId: "0123456789ABCDEF" }).shortId,
     "0123456789ABCDEF",
   );
-  expectConfigError(
-    { ...validDoc, clients: [] },
-    "main",
-    "non-empty list of clients",
-  );
+  expectConfigError({ ...validDoc, clients: [] }, "main", "non-empty list of clients");
   expectConfigError(
     { ...validDoc, clients: [{ name: "a" }, { name: "a" }] },
     "main",
@@ -180,15 +148,13 @@ test("loadServers reports the offending file on parse/validation errors", async 
     await writeFile(join(dir, "viper.bad.yml"), "ip: [unclosed\n");
     await assert.rejects(
       loadServers(dir),
-      (err: unknown) =>
-        err instanceof ConfigError && err.message.includes("viper.bad.yml"),
+      (err: unknown) => err instanceof ConfigError && err.message.includes("viper.bad.yml"),
     );
     await rm(join(dir, "viper.bad.yml"), { force: true });
     await writeFile(join(dir, "viper.bad.yml"), "domain: also-missing\n");
     await assert.rejects(
       loadServers(dir),
-      (err: unknown) =>
-        err instanceof ConfigError && err.message.includes("viper.bad.yml"),
+      (err: unknown) => err instanceof ConfigError && err.message.includes("viper.bad.yml"),
     );
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -212,8 +178,7 @@ test("resolveServerName: sole server defaults, multiple require --name, missing 
     servers = await loadServers(dir);
     assert.throws(
       () => resolveServerName(undefined, servers),
-      (err: unknown) =>
-        err instanceof ConfigError && err.message.includes("--name"),
+      (err: unknown) => err instanceof ConfigError && err.message.includes("--name"),
     );
     assert.equal(resolveServerName("alt", servers), "alt");
 

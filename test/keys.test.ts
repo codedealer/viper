@@ -59,10 +59,7 @@ test("fixture keypair is a real, consistent x25519 pair", () => {
 
 test("generateUuid yields UUIDv4", () => {
   const uuid = generateUuid();
-  assert.match(
-    uuid,
-    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-  );
+  assert.match(uuid, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
   assert.notEqual(uuid, generateUuid());
 });
 

@@ -19,11 +19,7 @@ export interface Subscription {
  * vless://uuid@<domain>:<port>?encryption=none&flow=...&security=reality
  *   &sni=...&fp=...&pbk=...&sid=...&type=tcp&headerType=none#<name>
  */
-export function vlessLine(
-  config: ServerConfig,
-  state: State,
-  client: StateClient,
-): string {
+export function vlessLine(config: ServerConfig, state: State, client: StateClient): string {
   const params = new URLSearchParams();
   params.set("encryption", "none");
   if (config.flow !== "") params.set("flow", config.flow);

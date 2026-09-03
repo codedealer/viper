@@ -97,11 +97,7 @@ async function ensureUnzip(conn: SshConn): Promise<boolean> {
  * state.installedPackages (+ persist). Both paths must bookkeep
  * identically, or teardown would miss a viper-installed unzip.
  */
-async function ensureUnzipRecorded(
-  conn: SshConn,
-  ctx: StepCtx,
-  opts: HardeningStepOptions,
-): Promise<void> {
+async function ensureUnzipRecorded(conn: SshConn, ctx: StepCtx, opts: HardeningStepOptions): Promise<void> {
   const installed = await ensureUnzip(conn);
   if (installed && !ctx.state.installedPackages.includes("unzip")) {
     ctx.state.installedPackages.push("unzip");
@@ -116,10 +112,9 @@ async function downloadAndVerify(conn: SshConn, version: string): Promise<void> 
   const zipUrl = XRAY_ZIP_URL(version);
   await conn.run(`mkdir -p ${DOWNLOAD_DIR}`, { timeoutMs: 10_000 });
 
-  const dlZip = await conn.run(
-    `curl -fsSL --max-time 300 ${zipUrl} -o ${DOWNLOAD_DIR}/${XRAY_ZIP}`,
-    { timeoutMs: 320_000 },
-  );
+  const dlZip = await conn.run(`curl -fsSL --max-time 300 ${zipUrl} -o ${DOWNLOAD_DIR}/${XRAY_ZIP}`, {
+    timeoutMs: 320_000,
+  });
   if (dlZip.code !== 0) {
     await conn.run(`rm -rf ${DOWNLOAD_DIR}`, { timeoutMs: 10_000 });
     throw new Error(`download failed: ${errDetail(dlZip.stderr)}`);
@@ -136,26 +131,22 @@ async function downloadAndVerify(conn: SshConn, version: string): Promise<void> 
     );
   }
 
-  const expected = await conn.run(
-    `grep '^SHA2-256=' ${DOWNLOAD_DIR}/${XRAY_ZIP}.dgst | awk '{print $2}'`,
-    { timeoutMs: 10_000 },
-  );
+  const expected = await conn.run(`grep '^SHA2-256=' ${DOWNLOAD_DIR}/${XRAY_ZIP}.dgst | awk '{print $2}'`, {
+    timeoutMs: 10_000,
+  });
   const expectedHex = expected.stdout.trim();
   if (!/^[0-9a-f]{64}$/.test(expectedHex)) {
     await conn.run(`rm -rf ${DOWNLOAD_DIR}`, { timeoutMs: 10_000 });
     throw new Error(`could not parse SHA2-256 from digest file (got: "${expectedHex}")`);
   }
 
-  const actual = await conn.run(
-    `sha256sum ${DOWNLOAD_DIR}/${XRAY_ZIP} | awk '{print $1}'`,
-    { timeoutMs: 60_000 },
-  );
+  const actual = await conn.run(`sha256sum ${DOWNLOAD_DIR}/${XRAY_ZIP} | awk '{print $1}'`, {
+    timeoutMs: 60_000,
+  });
   const actualHex = actual.stdout.trim();
   if (actualHex !== expectedHex) {
     await conn.run(`rm -rf ${DOWNLOAD_DIR}`, { timeoutMs: 10_000 });
-    throw new Error(
-      `SHA2-256 mismatch: expected ${expectedHex}, got ${actualHex} — refusing to install`,
-    );
+    throw new Error(`SHA2-256 mismatch: expected ${expectedHex}, got ${actualHex} — refusing to install`);
   }
 }
 
@@ -220,7 +211,12 @@ async function doInstall(conn: SshConn, ctx: StepCtx, opts: HardeningStepOptions
     const unitChanged = await ensureUnit(conn);
 
     const geoOut = await conn.run(`ls ${XRAY_GEO_DIR} 2>/dev/null`, { timeoutMs: 10_000 });
-    const geoFiles = new Set(geoOut.stdout.split("\n").map((s) => s.trim()).filter(Boolean));
+    const geoFiles = new Set(
+      geoOut.stdout
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    );
     let geoChanged = false;
     if (!geoFiles.has("geoip.dat") || !geoFiles.has("geosite.dat")) {
       await ensureUnzipRecorded(conn, ctx, opts);

@@ -30,7 +30,8 @@ test("teardown: fully installed — unit, binary, geo, config removed", async ()
   const cmds = remote.commands;
   // Stop BEFORE removing (no lockout-style ordering surprise for xray).
   assert.ok(
-    cmds.findIndex((c) => c.includes("disable --now")) < cmds.findIndex((c) => c.includes("rm -f /usr/local/bin/xray")),
+    cmds.findIndex((c) => c.includes("disable --now")) <
+      cmds.findIndex((c) => c.includes("rm -f /usr/local/bin/xray")),
   );
   assert.ok(cmds.includes("rm -f /etc/systemd/system/xray.service"));
   assert.ok(cmds.includes("systemctl daemon-reload"));

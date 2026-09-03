@@ -18,8 +18,7 @@ const baseState: State = {
   installedPackages: ["nginx", "unzip"],
 };
 
-const UUID_V4_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const KEY_URL_B64_RE = /^[A-Za-z0-9_-]{43}$/;
 const HEX32_RE = /^[0-9a-f]{32}$/;
 
@@ -61,8 +60,5 @@ test("rotateState: result round-trips through the canonical state codec", () => 
   const reparsed = parseState(JSON.parse(JSON.stringify(rotated)));
   assert.deepEqual(reparsed, rotated);
   // canonical serialization is deterministic for the rotated state
-  assert.equal(
-    serializeState(parseState(JSON.parse(JSON.stringify(rotated)))),
-    serializeState(rotated),
-  );
+  assert.equal(serializeState(parseState(JSON.parse(JSON.stringify(rotated)))), serializeState(rotated));
 });

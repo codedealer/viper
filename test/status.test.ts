@@ -169,7 +169,12 @@ function fakeStatusData(): StatusData {
     ram: "1234 MB / 7828 MB",
     disk: "5120 MB / 40900 MB",
     clients: [
-      { name: "default", uuid: "123e4567-e89b-42d3-a456-426614174000", uplink: 1024, downlink: 2048 },
+      {
+        name: "default",
+        uuid: "123e4567-e89b-42d3-a456-426614174000",
+        uplink: 1024,
+        downlink: 2048,
+      },
     ],
     handshake: { ok: true, detail: "REALITY handshake OK (HTTP 204 via gstatic)" },
     cert: {
@@ -217,9 +222,7 @@ test("StatusTui: ink smoke — first frame renders, 5s-style refresh repeats", a
     return fakeStatusData();
   };
 
-  const { lastFrame, unmount } = inkRender(
-    React.createElement(StatusTui, { collect, refreshMs: 20 }),
-  );
+  const { lastFrame, unmount } = inkRender(React.createElement(StatusTui, { collect, refreshMs: 20 }));
 
   try {
     // initial load runs with checks
@@ -254,18 +257,40 @@ test("StatusTui: in-flight collect blocks overlapping refreshes (R8)", async () 
     return fakeStatusData();
   };
 
-  const { unmount } = inkRender(
-    React.createElement(StatusTui, { collect, refreshMs: 10 }),
-  );
+  const { unmount } = inkRender(React.createElement(StatusTui, { collect, refreshMs: 10 }));
   try {
     await sleep(120);
   } finally {
     unmount();
   }
-  assert.ok(
-    maxInFlight <= 1,
-    `overlapping collects on one connection: max in flight = ${maxInFlight}`,
-  );
+  assert.ok(maxInFlight <= 1, `overlapping collects on one connection: max in flight = ${maxInFlight}`);
+});
+
+test("StatusTui: manual r during an in-flight collect defers exactly one refresh (L2)", async () => {
+  const runChecksSeen: boolean[] = [];
+  let calls = 0;
+  const collect = async (opts?: { runChecks?: boolean }): Promise<StatusData> => {
+    runChecksSeen.push(Boolean(opts?.runChecks));
+    calls += 1;
+    // The initial load's collect is slow; the deferred one is fast.
+    if (calls === 1) await sleep(80);
+    return fakeStatusData();
+  };
+
+  const { stdin, unmount } = inkRender(React.createElement(StatusTui, { collect, refreshMs: 10_000 }));
+  try {
+    // While the slow initial collect is in flight, press `r` twice in
+    // quick succession — both must coalesce into a single deferred refresh.
+    await sleep(20);
+    stdin.write("r");
+    await sleep(10);
+    stdin.write("r");
+    await sleep(150);
+  } finally {
+    unmount();
+  }
+  assert.equal(calls, 2, `expected initial + exactly one deferred collect, got ${calls}`);
+  assert.deepEqual(runChecksSeen, [true, true], "initial load and the deferred refresh both run checks");
 });
 
 test("StatusTui: shows the error frame when the first collect fails", async () => {

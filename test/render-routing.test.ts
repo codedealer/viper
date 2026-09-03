@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  renderRoutingLine,
-  renderRoutingProfile,
-} from "../src/render/routing.js";
+import { renderRoutingLine, renderRoutingProfile } from "../src/render/routing.js";
 import { assertGolden } from "./golden.js";
 
 const PREFIX = "happ://routing/onadd/";
@@ -15,9 +12,7 @@ test("routing line — golden + documented profile decodes from it", () => {
 
   const b64 = line.slice(PREFIX.length);
   assert.match(b64, /^[A-Za-z0-9+/]+=*$/);
-  const profile = JSON.parse(
-    Buffer.from(b64, "base64").toString("utf8"),
-  ) as Record<string, unknown>;
+  const profile = JSON.parse(Buffer.from(b64, "base64").toString("utf8")) as Record<string, unknown>;
 
   // Golden of the decoded profile (pretty-printed for diffability).
   assertGolden(import.meta.url, "routing-profile.json", JSON.stringify(profile, null, 4) + "\n");
@@ -33,10 +28,8 @@ test("profile matches the documented Happ default profile exactly", () => {
     DomesticDNSType: "DoH",
     DomesticDNSDomain: "https://dns.google/dns-query",
     DomesticDNSIP: "8.8.8.8",
-    Geoipurl:
-      "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
-    Geositeurl:
-      "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
+    Geoipurl: "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
+    Geositeurl: "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
     DnsHosts: {
       "cloudflare-dns.com": "1.1.1.1",
       "dns.google": "8.8.8.8",
@@ -89,8 +82,5 @@ test("renderer is pure and deterministic", () => {
   // re-rendering never mutates the profile object the caller sees
   const a = renderRoutingProfile();
   a.DirectIp = ["hacked"];
-  assert.deepEqual(
-    (renderRoutingProfile().DirectIp as string[])[0],
-    "10.0.0.0/8",
-  );
+  assert.deepEqual((renderRoutingProfile().DirectIp as string[])[0], "10.0.0.0/8");
 });

@@ -18,12 +18,7 @@
 import type { SshConn } from "../ssh.js";
 import type { ServerConfig } from "../config.js";
 import type { Step, StepCtx, StepResult } from "./runner.js";
-import {
-  detectSshdPorts,
-  errDetail,
-  uploadRendered,
-  type HardeningStepOptions,
-} from "./common.js";
+import { detectSshdPorts, errDetail, uploadRendered, type HardeningStepOptions } from "./common.js";
 import { preflightStep } from "./preflight.js";
 import { packagesStep } from "./packages.js";
 
@@ -117,7 +112,10 @@ export function autoUpgradesStep(): Step {
       await uploadRendered(conn, content, AUTO_UPGRADES_PATH, "20auto-upgrades");
       const chmod = await conn.run(`chmod 644 ${AUTO_UPGRADES_PATH}`, { timeoutMs: 15_000 });
       if (chmod.code !== 0) {
-        return { status: "failed", detail: `chmod 644 ${AUTO_UPGRADES_PATH} failed: ${errDetail(chmod.stderr)}` };
+        return {
+          status: "failed",
+          detail: `chmod 644 ${AUTO_UPGRADES_PATH} failed: ${errDetail(chmod.stderr)}`,
+        };
       }
       return { status: "changed", detail: `${AUTO_UPGRADES_PATH} written` };
     },
@@ -165,7 +163,10 @@ export function sshStep(): Step {
         await uploadRendered(conn, content, SSHD_DROPIN_PATH, "00-viper.conf");
         const chmod = await conn.run(`chmod 644 ${SSHD_DROPIN_PATH}`, { timeoutMs: 15_000 });
         if (chmod.code !== 0) {
-          return { status: "failed", detail: `chmod 644 ${SSHD_DROPIN_PATH} failed: ${errDetail(chmod.stderr)}` };
+          return {
+            status: "failed",
+            detail: `chmod 644 ${SSHD_DROPIN_PATH} failed: ${errDetail(chmod.stderr)}`,
+          };
         }
         // rc intentionally ignored: no other drop-ins → the glob stays
         // literal and sed fails silently (2>/dev/null).
@@ -236,9 +237,7 @@ export function sshStep(): Step {
       }
       return {
         status: "changed",
-        detail: wrote
-          ? "drop-in written, sshd restarted"
-          : "conflicting drop-in neutralized, sshd restarted",
+        detail: wrote ? "drop-in written, sshd restarted" : "conflicting drop-in neutralized, sshd restarted",
       };
     },
   };
@@ -339,8 +338,8 @@ export function bbrStep(): Step {
               status: "skipped",
               detail:
                 `WARNING: BBR genuinely unavailable here (probe ${
-                  available ? "reported bbr" : "found no bbr"}; sysctl ${key} missing) ` +
-                "— continuing without BBR",
+                  available ? "reported bbr" : "found no bbr"
+                }; sysctl ${key} missing) ` + "— continuing without BBR",
             };
           }
           return { status: "failed", detail: `sysctl ${key} failed: ${errDetail(res.stderr)}` };
@@ -416,21 +415,26 @@ export function ufwStep(): Step {
       // dIn->"allow" re-issues exactly the policy we want (deny incoming
       // is a no-op server-side when already deny); dOut->"allow" never
       // re-issues.
-      const defaultLine =
-        status.stdout.split("\n").find((l) => l.startsWith("Default:")) ?? "";
+      const defaultLine = status.stdout.split("\n").find((l) => l.startsWith("Default:")) ?? "";
       const dIn = defaultLine.match(/(\w+)\s*\(incoming\)/)?.[1] ?? "allow";
       const dOut = defaultLine.match(/(\w+)\s*\(outgoing\)/)?.[1] ?? "allow";
       if (dIn !== "deny") {
         const denyIn = await conn.run("ufw default deny incoming", { timeoutMs: 15_000 });
         if (denyIn.code !== 0) {
-          return { status: "failed", detail: `ufw default deny incoming failed: ${errDetail(denyIn.stderr)}` };
+          return {
+            status: "failed",
+            detail: `ufw default deny incoming failed: ${errDetail(denyIn.stderr)}`,
+          };
         }
         changed = true;
       }
       if (dOut !== "allow") {
         const allowOut = await conn.run("ufw default allow outgoing", { timeoutMs: 15_000 });
         if (allowOut.code !== 0) {
-          return { status: "failed", detail: `ufw default allow outgoing failed: ${errDetail(allowOut.stderr)}` };
+          return {
+            status: "failed",
+            detail: `ufw default allow outgoing failed: ${errDetail(allowOut.stderr)}`,
+          };
         }
         changed = true;
       }
@@ -465,11 +469,7 @@ export function ufwStep(): Step {
  * (not run, not traced); `bbr: false` excludes bbr. Preflight and
  * packages always run.
  */
-export function hardeningSteps(
-  _ctx: StepCtx,
-  config: ServerConfig,
-  opts: HardeningStepOptions = {},
-): Step[] {
+export function hardeningSteps(_ctx: StepCtx, config: ServerConfig, opts: HardeningStepOptions = {}): Step[] {
   const steps: Step[] = [preflightStep(opts), packagesStep(opts)];
   if (config.harden) {
     steps.push(tzStep(), autoUpgradesStep(), sshStep(), fail2banStep());
