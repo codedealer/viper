@@ -14,8 +14,8 @@ function ctx(): StepCtx {
   };
 }
 
-test("xraySteps — ordered install → deploy → verify triple", () => {
-  const steps = xraySteps(ctx(), fixtureConfig);
+test("xraySteps — ordered install → deploy → verify triple (no ctx/config params)", () => {
+  const steps = xraySteps();
   assert.deepEqual(
     steps.map((s) => s.name),
     [
@@ -29,12 +29,12 @@ test("xraySteps — ordered install → deploy → verify triple", () => {
 });
 
 test("xraySteps — honors opts (no throw with poll overrides)", () => {
-  const steps = xraySteps(ctx(), fixtureConfig, { poll: { attempts: 2, intervalMs: 1 } });
+  const steps = xraySteps({ poll: { attempts: 2, intervalMs: 1 } });
   assert.equal(steps.length, 5);
 });
 
-test("xrayTeardownSteps — single teardown step", () => {
-  const steps = xrayTeardownSteps(ctx());
+test("xrayTeardownSteps — single teardown step (no ctx param)", () => {
+  const steps = xrayTeardownSteps();
   assert.deepEqual(
     steps.map((s) => s.name),
     ["Remove Xray (teardown)"],

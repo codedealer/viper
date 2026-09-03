@@ -7,16 +7,17 @@ import {
 } from "../src/steps/xray-verify.js";
 import { renderXrayProbeClient } from "../src/render/xray-probe.js";
 import { FakeRemote } from "./fake-remote.js";
-import { fixtureConfig, fixtureState } from "./fixtures.js";
+import { fixtureConfig, fixtureState, multiClientConfig, multiClientState } from "./fixtures.js";
 import type { StepCtx } from "../src/steps/runner.js";
 
-function ctx(): StepCtx {
+function ctx(overrides: Partial<StepCtx> = {}): StepCtx {
   return {
     name: "main",
     ip: fixtureConfig.ip,
     config: fixtureConfig,
     state: { ...fixtureState, installedPackages: [] },
     artifacts: {},
+    ...overrides,
   };
 }
 
@@ -114,6 +115,46 @@ test("probe: socks port never opens — failed with log tail", async () => {
   assert.match(res.detail ?? "", /did not open SOCKS port 10809/);
   assert.match(res.detail ?? "", /address already in use/);
   assert.ok(remote.commands.includes("rm -rf /tmp/viper-probe"));
+});
+
+test("probe: multi-client — EVERY client is probed (R10.4)", async () => {
+  const remote = new FakeRemote({ xrayInstalled: true, xrayActive: true });
+  const c = ctx({ config: multiClientConfig, state: multiClientState });
+  const res = await xrayHandshakeProbeStep(FAST).run(remote, c);
+  assert.equal(res.status, "ok");
+  assert.match(res.detail ?? "", /3 clients/);
+
+  // One probe config upload per client, each carrying that client's uuid.
+  const uploads = remote.uploads.filter((u) => u.remote === "/tmp/viper-probe/config.json");
+  assert.equal(uploads.length, 3);
+  for (const cl of multiClientState.clients) {
+    assert.ok(
+      uploads.some((u) => u.content.includes(cl.uuid)),
+      `probe config for client "${cl.name}" carries its uuid`,
+    );
+  }
+  // Three full probe cycles: 3 curls, 3 pid kills, 3 sandbox removals.
+  assert.equal(
+    remote.commands.filter((x) => x.startsWith("curl --socks5-hostname")).length,
+    3,
+  );
+  assert.equal(remote.commands.filter((x) => x.startsWith("kill ")).length, 3);
+  assert.equal(remote.commands.filter((x) => x === "rm -rf /tmp/viper-probe").length, 3);
+});
+
+test("probe: multi-client — first client failure stops the loop", async () => {
+  const remote = new FakeRemote({ xrayInstalled: true, probeCurlCode: "000" });
+  const c = ctx({ config: multiClientConfig, state: multiClientState });
+  const res = await xrayHandshakeProbeStep(FAST).run(remote, c);
+  assert.equal(res.status, "failed");
+  assert.match(res.detail ?? "", /client "default"/);
+  assert.match(res.detail ?? "", /HTTP 000/);
+  assert.equal(
+    remote.commands.filter((x) => x.startsWith("curl --socks5-hostname")).length,
+    1,
+    "only the failing client was probed",
+  );
+  assert.ok(remote.commands.includes("rm -rf /tmp/viper-probe"), "cleaned up");
 });
 
 test("probe: xray binary missing — failed (nohup error surfaced)", async () => {

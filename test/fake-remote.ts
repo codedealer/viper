@@ -25,6 +25,14 @@ export interface FakeRemoteOptions {
   sshdConfigOk?: boolean;
   /** Effective sshd -T settings (default: hardened + debianbanner). */
   effectiveSsh?: Record<string, string>;
+  /** If set: after the neutralize loop runs once, the effective settings
+   *  become this (simulates a conflicting drop-in that the loop
+   *  sed-comments out). */
+  effectiveSshAfterNeutralize?: Record<string, string>;
+  /** /etc/os-release read fails with this stderr. */
+  osReleaseFails?: string;
+  /** Every SFTP upload throws with this message. */
+  uploadFails?: string;
   /** Packages already installed (default: none of viper's four). */
   packages?: string[];
   /** If set: apt-get update fails with this stderr. */
@@ -91,6 +99,10 @@ export interface FakeRemoteOptions {
   probeCurlCode?: string;
   /** Pre-seeded unit content (default: absent). */
   xrayUnitFile?: string;
+  /** xray unit enabled state (default: enabled iff the unit file was
+   *  pre-seeded — a freshly uploaded unit is not enabled until viper
+   *  runs `systemctl enable xray`). */
+  xrayUnitEnabled?: boolean;
   /** Pre-seeded /etc/xray/config.json content (default: absent). */
   xrayConfigFile?: string;
   /** Installed but geo assets missing (default false). */
@@ -196,6 +208,10 @@ export class FakeRemote implements SshConn {
   private crontabHasAcme: boolean;
   private certIssued: boolean;
   private deployedCertMd5: string | undefined;
+  /** Effective sshd -T (mutable: the neutralize loop can fix it). */
+  private effectiveSsh: Record<string, string>;
+  /** xray unit enabled (mutable: enable/disable commands). */
+  private xrayUnitEnabled: boolean;
   /** nginx reloads issued (idempotency assertions count these). */
   private nginxReloads = 0;
   private symlinks = new Set<string>();
@@ -276,6 +292,8 @@ export class FakeRemote implements SshConn {
     this.listeningPorts = new Set(this.opts.listeningPorts ?? []);
     this.probeRunning = opts.orphanProbe === true;
     this.probeLog = "";
+    this.effectiveSsh = { ...this.opts.effectiveSsh };
+    this.xrayUnitEnabled = this.opts.xrayUnitEnabled ?? this.opts.xrayUnitFile !== undefined;
     this.cronServiceActive = this.opts.cronServiceActive ?? true;
     this.acmeInstalled = this.opts.acmeInstalled ?? false;
     this.crontabHasAcme = false;
@@ -308,6 +326,7 @@ export class FakeRemote implements SshConn {
   async close(): Promise<void> {}
 
   async upload(local: string, remote: string): Promise<void> {
+    if (this.opts.uploadFails !== undefined) throw new Error(this.opts.uploadFails);
     const content = await readFile(local, "utf8");
     this.uploads.push({ local, remote, content });
     this.files.set(remote, content);
@@ -324,6 +343,7 @@ export class FakeRemote implements SshConn {
 
     // --- preflight ---
     if (cmd === `bash -c '. /etc/os-release && echo "$ID:$VERSION_CODENAME"'`) {
+      if (this.opts.osReleaseFails !== undefined) return fail(1, this.opts.osReleaseFails);
       return ok(`${this.opts.osId}:${this.opts.osVersion}`);
     }
     if (cmd === "df -BM --output=avail / | tail -1") {
@@ -395,12 +415,17 @@ export class FakeRemote implements SshConn {
       return f !== undefined ? ok(f) : fail(1, "");
     }
     if (cmd === "chmod 644 /etc/ssh/sshd_config.d/00-viper.conf") return ok();
-    if (cmd.startsWith("for f in /etc/ssh/sshd_config.d/*.conf; do")) return ok();
+    if (cmd.startsWith("for f in /etc/ssh/sshd_config.d/*.conf; do")) {
+      if (this.opts.effectiveSshAfterNeutralize !== undefined) {
+        this.effectiveSsh = { ...this.opts.effectiveSshAfterNeutralize };
+      }
+      return ok();
+    }
     if (cmd === "sshd -t") {
       return this.opts.sshdConfigOk ? ok() : fail(3, "/etc/ssh/sshd_config line 5: Bad configuration option");
     }
     if (cmd === "sshd -T 2>/dev/null") {
-      const out = Object.entries(this.opts.effectiveSsh)
+      const out = Object.entries(this.effectiveSsh)
         .map(([k, v]) => `${k} ${v}`)
         .join("\n");
       return ok(out + (out ? "\n" : ""));
@@ -437,6 +462,10 @@ export class FakeRemote implements SshConn {
     if (cmd === "modprobe tcp_bbr 2>/dev/null") {
       // module "already loaded" → non-zero, ignored by the step
       return fail(1, "modprobe: FATAL: Module tcp_bbr not found in directory /lib/modules");
+    }
+    if (cmd === "cat /etc/sysctl.d/99-viper.conf 2>/dev/null") {
+      const f = this.files.get("/etc/sysctl.d/99-viper.conf");
+      return f !== undefined ? ok(f) : fail(1, "");
     }
     if (cmd === "sysctl -w net.core.default_qdisc=fq" || cmd === "sysctl -w net.ipv4.tcp_congestion_control=bbr") {
       if (this.opts.sysctlUnavailable) {
@@ -575,10 +604,17 @@ export class FakeRemote implements SshConn {
       return f !== undefined ? ok(f) : fail(1, "");
     }
     if (cmd === "systemctl daemon-reload") return ok();
+    if (cmd === "systemctl is-enabled xray 2>/dev/null") {
+      if (!this.files.has("/etc/systemd/system/xray.service") || !this.xrayUnitEnabled) {
+        return fail(1, "disabled\n");
+      }
+      return ok("enabled\n");
+    }
     if (cmd === "systemctl enable xray") {
       if (!this.files.has("/etc/systemd/system/xray.service")) {
         return fail(1, "Failed to enable unit: Unit file xray.service does not exist.");
       }
+      this.xrayUnitEnabled = true;
       return ok();
     }
     if (cmd === "rm -rf /tmp/viper-xray") {
@@ -681,6 +717,7 @@ export class FakeRemote implements SshConn {
     }
     if (cmd === "systemctl disable --now xray 2>/dev/null") {
       this.xrayActive = false;
+      this.xrayUnitEnabled = false;
       return ok();
     }
     if (cmd === "rm -f /etc/systemd/system/xray.service") {
@@ -840,7 +877,7 @@ export class FakeRemote implements SshConn {
     if (cmd === "uptime -p") {
       return ok((this.opts.hostUptime ?? "up 3 hours, 12 minutes") + "\n");
     }
-    if (cmd === "top -bn1") {
+    if (cmd === "LC_ALL=C top -bn1") {
       const idle = this.opts.cpuIdle ?? 95.0;
       const busy = Math.max(0, 100 - idle);
       return ok(

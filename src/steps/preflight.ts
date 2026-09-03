@@ -32,7 +32,9 @@ export function preflightStep(opts: HardeningStepOptions = {}): Step {
     name: "Preflight",
     run: async (conn, ctx): Promise<StepResult> => {
       const domain = ctx.config.domain;
-      const ip = ctx.config.ip;
+      // The EFFECTIVE ip (the `--ip` override when given), per the
+      // StepCtx contract — not ctx.config.ip.
+      const ip = ctx.ip;
 
       // 1 — OS
       const os = await conn.run(OS_RELEASE_CMD, { timeoutMs: 15_000 });

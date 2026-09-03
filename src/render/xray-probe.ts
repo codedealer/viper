@@ -14,21 +14,29 @@ export const PROBE_SOCKS_PORT = 10809;
  * verify step to prove, end-to-end, that the deployed server accepts
  * our uuid/shortId/flow over REALITY with the pinned binary.
  *
+ * `clientName` selects which config/state client pair to probe (default:
+ * the first client). The verify step probes EVERY client: each client's
+ * uuid is the credential a real client will present.
+ *
  * Field names per the pinned v26.3.27 docs:
  *  - client-side reality `password` holds the server PUBLIC key
  *    (renamed from `publicKey` in older versions)
  *  - vless outbound uses the flat settings form
  *    (address/port/id/encryption/flow) shown in the pinned docs
  */
-export function renderXrayProbeClient(config: ServerConfig, state: State): string {
-  const clientName = config.clients[0]?.name;
-  if (clientName === undefined) {
+export function renderXrayProbeClient(
+  config: ServerConfig,
+  state: State,
+  clientName?: string,
+): string {
+  const name = clientName ?? config.clients[0]?.name;
+  if (name === undefined) {
     throw new Error("render/xray-probe: config has no clients");
   }
-  const uuid = state.clients.find((c) => c.name === clientName)?.uuid;
+  const uuid = state.clients.find((c) => c.name === name)?.uuid;
   if (uuid === undefined) {
     throw new Error(
-      `render/xray-probe: state has no uuid for client "${clientName}" — re-run render to regenerate state`,
+      `render/xray-probe: state has no uuid for client "${name}" — re-run render to regenerate state`,
     );
   }
 

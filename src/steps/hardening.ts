@@ -124,6 +124,35 @@ export function autoUpgradesStep(): Step {
   };
 }
 
+/**
+ * Check `sshd -T` output against viper's required effective settings.
+ * Returns null when compliant, else a human-readable mismatch detail.
+ * A missing auth directive is a mismatch: the distro default is `yes` for
+ * both, so "absent" is not "no".
+ */
+function effectiveMismatch(stdout: string): string | null {
+  const effective = new Map<string, string>();
+  for (const line of stdout.split("\n")) {
+    const i = line.indexOf(" ");
+    if (i > 0) effective.set(line.slice(0, i).toLowerCase(), line.slice(i + 1).trim());
+  }
+  const required: ReadonlyArray<readonly [string, string]> = [
+    ["passwordauthentication", "no"],
+    ["kbdinteractiveauthentication", "no"],
+  ];
+  for (const [key, want] of required) {
+    const got = effective.get(key);
+    if (got !== want) return `expected ${key} ${want} (found ${got ?? "absent"})`;
+  }
+  // DebianBanner is a Debian/Ubuntu-specific directive; builds that don't
+  // recognize it omit it from sshd -T — skip verification then.
+  const banner = effective.get("debianbanner");
+  if (banner !== undefined && banner !== "no") {
+    return `expected debianbanner no (found ${banner})`;
+  }
+  return null;
+}
+
 export function sshStep(): Step {
   return {
     name: "Harden SSH configuration",
@@ -131,6 +160,7 @@ export function sshStep(): Step {
       const content = renderSshdDropin();
       const check = await conn.run(`cat ${SSHD_DROPIN_PATH} 2>/dev/null`, { timeoutMs: 15_000 });
       let changed = false;
+      let wrote = false;
       if (check.code !== 0 || check.stdout.trim() !== content.trim()) {
         await uploadRendered(conn, content, SSHD_DROPIN_PATH, "00-viper.conf");
         const chmod = await conn.run(`chmod 644 ${SSHD_DROPIN_PATH}`, { timeoutMs: 15_000 });
@@ -141,6 +171,7 @@ export function sshStep(): Step {
         // literal and sed fails silently (2>/dev/null).
         await conn.run(NEUTRALIZE_DROPINS_CMD, { timeoutMs: 15_000 });
         changed = true;
+        wrote = true;
       }
 
       // Validate the config file BEFORE restarting (lockout safety).
@@ -156,32 +187,40 @@ export function sshStep(): Step {
       if (effectiveRes.code !== 0) {
         return { status: "failed", detail: `sshd -T failed: ${errDetail(effectiveRes.stderr)}` };
       }
-      const effective = new Map<string, string>();
-      for (const line of effectiveRes.stdout.split("\n")) {
-        const i = line.indexOf(" ");
-        if (i > 0) effective.set(line.slice(0, i).toLowerCase(), line.slice(i + 1).trim());
-      }
-      const required: ReadonlyArray<readonly [string, string]> = [
-        ["passwordauthentication", "no"],
-        ["kbdinteractiveauthentication", "no"],
-      ];
-      for (const [key, want] of required) {
-        const got = effective.get(key);
-        if (got !== want) {
+      let mismatch = effectiveMismatch(effectiveRes.stdout);
+
+      if (mismatch !== null) {
+        // A conflicting directive may have appeared in ANOTHER drop-in
+        // after viper's last write (cloud-init or a user editing
+        // sshd_config.d/). The neutralize loop is idempotent and bounded
+        // — it only sed-comments viper's auth directives in
+        // sshd_config.d/*.conf (never 00-viper.conf, never the main
+        // sshd_config) — so re-run it and re-check before failing.
+        await conn.run(NEUTRALIZE_DROPINS_CMD, { timeoutMs: 15_000 });
+        const revalidate = await conn.run("sshd -t", { timeoutMs: 15_000 });
+        if (revalidate.code !== 0) {
           return {
             status: "failed",
-            detail: `effective sshd setting mismatch: expected ${key} ${want} (found ${got ?? "absent"})`,
+            detail: `sshd config validation failed after neutralize: ${errDetail(revalidate.stderr)}`,
           };
         }
-      }
-      // DebianBanner is a Debian/Ubuntu-specific directive; builds that
-      // don't recognize it omit it from sshd -T — skip verification then.
-      const banner = effective.get("debianbanner");
-      if (banner !== undefined && banner !== "no") {
-        return {
-          status: "failed",
-          detail: `effective sshd setting mismatch: expected debianbanner no (found ${banner})`,
-        };
+        const recheckRes = await conn.run("sshd -T 2>/dev/null", { timeoutMs: 15_000 });
+        if (recheckRes.code === 0) {
+          const recheck = effectiveMismatch(recheckRes.stdout);
+          if (recheck === null) {
+            mismatch = null;
+            changed = true; // neutralized a conflicting drop-in → restart
+          }
+        }
+        if (mismatch !== null) {
+          return {
+            status: "failed",
+            detail:
+              `effective sshd setting mismatch: ${mismatch} — ` +
+              `check /etc/ssh/sshd_config and /etc/ssh/sshd_config.d/ for a ` +
+              `conflicting directive outside 00-viper.conf`,
+          };
+        }
       }
 
       if (!changed) {
@@ -195,7 +234,12 @@ export function sshStep(): Step {
       if (restart.code !== 0) {
         return { status: "failed", detail: `sshd restart failed: ${errDetail(restart.stderr)}` };
       }
-      return { status: "changed", detail: "drop-in written, sshd restarted" };
+      return {
+        status: "changed",
+        detail: wrote
+          ? "drop-in written, sshd restarted"
+          : "conflicting drop-in neutralized, sshd restarted",
+      };
     },
   };
 }
@@ -243,6 +287,7 @@ export function bbrStep(): Step {
   return {
     name: "Enable BBR congestion control",
     run: async (conn): Promise<StepResult> => {
+      const content = renderBbrSysctlConf();
       const cc = await conn.run("sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null", {
         timeoutMs: 15_000,
       });
@@ -251,7 +296,21 @@ export function bbrStep(): Step {
           timeoutMs: 15_000,
         });
         if (qd.code === 0 && qd.stdout.trim() === "fq") {
-          return { status: "ok", detail: "already enabled" };
+          // The live sysctls may have been set by a run that died between
+          // the `sysctl -w` calls and the SFTP persist — re-check the
+          // persist file so BBR survives reboots (a live-only box loses
+          // it on the next reboot).
+          const persist = await conn.run(`cat ${BBR_SYCTL_PATH} 2>/dev/null`, {
+            timeoutMs: 15_000,
+          });
+          if (persist.code === 0 && persist.stdout.trim() === content.trim()) {
+            return { status: "ok", detail: "already enabled" };
+          }
+          await uploadRendered(conn, content, BBR_SYCTL_PATH, "99-viper.conf");
+          return {
+            status: "changed",
+            detail: `bbr already enabled live, persisted to ${BBR_SYCTL_PATH}`,
+          };
         }
       }
 

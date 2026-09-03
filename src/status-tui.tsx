@@ -37,9 +37,15 @@ export function StatusTui({ collect, refreshMs = 5000 }: StatusTuiProps) {
   const [checking, setChecking] = useState(false);
   const dataRef = useRef<StatusData | null>(null);
   dataRef.current = data;
+  const inflight = useRef(false);
 
   const refresh = useCallback(
     async (runChecks: boolean) => {
+      // Overlap guard: a slow collect (e.g. a hung probe after `r`) must
+      // not stack a second collect on the same connection — skip the tick
+      // if one is still in flight.
+      if (inflight.current) return;
+      inflight.current = true;
       try {
         const prev = dataRef.current ?? undefined;
         const next = await collect({
@@ -50,6 +56,8 @@ export function StatusTui({ collect, refreshMs = 5000 }: StatusTuiProps) {
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        inflight.current = false;
       }
     },
     // `collect` is stable for the lifetime of the TUI (a closure over the

@@ -10,6 +10,7 @@ import {
   statsApiFromRendered,
   type StatusData,
 } from "../src/status.js";
+import type { SshConn } from "../src/ssh.js";
 import { StatusTui } from "../src/status-tui.js";
 import { FakeRemote } from "./fake-remote.js";
 import { fixtureConfig, fixtureState } from "./fixtures.js";
@@ -112,6 +113,28 @@ test("collectStatus: xray unit inactive is surfaced", async () => {
   });
   assert.equal(data.unitActive, false);
   assert.equal(data.handshake.ok, false);
+});
+
+test("collectStatus: fully failed connection degrades to n/a, never rejects (R7)", async () => {
+  const conn: SshConn = {
+    run: async () => {
+      throw new Error("socket closed");
+    },
+    upload: async () => {
+      throw new Error("socket closed");
+    },
+    close: async () => {},
+    hostKeyFingerprint: () => undefined,
+  };
+  const data = await collectStatus(conn, fixtureConfig, fixtureState, {
+    runChecks: false,
+  });
+  assert.equal(data.cpu, "n/a");
+  assert.equal(data.ram, "n/a");
+  assert.equal(data.disk, "n/a");
+  assert.equal(data.xrayVersion, "unavailable");
+  assert.equal(data.unitActive, false);
+  assert.equal(data.subMtime, "n/a");
 });
 
 test("statsApiFromRendered: port comes from the rendered config.json", () => {
@@ -218,6 +241,31 @@ test("StatusTui: ink smoke — first frame renders, 5s-style refresh repeats", a
   } finally {
     unmount();
   }
+});
+
+test("StatusTui: in-flight collect blocks overlapping refreshes (R8)", async () => {
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const collect = async (): Promise<StatusData> => {
+    inFlight += 1;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    await sleep(40);
+    inFlight -= 1;
+    return fakeStatusData();
+  };
+
+  const { unmount } = inkRender(
+    React.createElement(StatusTui, { collect, refreshMs: 10 }),
+  );
+  try {
+    await sleep(120);
+  } finally {
+    unmount();
+  }
+  assert.ok(
+    maxInFlight <= 1,
+    `overlapping collects on one connection: max in flight = ${maxInFlight}`,
+  );
 });
 
 test("StatusTui: shows the error frame when the first collect fails", async () => {

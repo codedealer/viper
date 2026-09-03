@@ -176,6 +176,28 @@ test("preflight: resolver error (network) → failed distinctly from no-record",
   assert.match(res.detail ?? "", /EAI_AGAIN/);
 });
 
+test("preflight: os-release read failure → failed", async () => {
+  const remote = new FakeRemote({
+    osReleaseFails: "bash: /etc/os-release: No such file or directory",
+  });
+  const res = await runStep(remote, ctx(), { dnsResolver: resolveTo(fixtureConfig.ip) });
+  assert.equal(res.status, "failed");
+  assert.match(res.detail ?? "", /could not read \/etc\/os-release/);
+});
+
+test("preflight: DNS message uses the EFFECTIVE ip (ctx.ip), not config.ip", async () => {
+  // ctx.ip is the effective address (carries the --ip override); the DNS
+  // hint must name it even when it differs from ctx.config.ip.
+  const remote = new FakeRemote();
+  const c = ctx({ ip: "198.51.100.99", config: fixtureConfig });
+  const res = await runStep(remote, c, { dnsResolver: noRecord });
+  assert.equal(res.status, "failed");
+  assert.match(
+    res.detail ?? "",
+    /create an A record for vpn\.example\.com → 198\.51\.100\.99/,
+  );
+});
+
 test("preflight: read-only — no mutating commands, no uploads", async () => {
   const remote = new FakeRemote();
   await runStep(remote, ctx(), { dnsResolver: resolveTo(fixtureConfig.ip) });

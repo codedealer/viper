@@ -92,10 +92,26 @@ async function ensureUnzip(conn: SshConn): Promise<boolean> {
 }
 
 /**
- * Download ZIP + digest and verify the ZIP's SHA2-256.
- * Throws on any failure (missing digest, mismatch) after removing the
- * downloaded artifacts.
+ * Shared by the fresh/upgrade and the geo-repair path: ensure `unzip`
+ * is available, and — when THIS call installed it — record it in
+ * state.installedPackages (+ persist). Both paths must bookkeep
+ * identically, or teardown would miss a viper-installed unzip.
  */
+async function ensureUnzipRecorded(
+  conn: SshConn,
+  ctx: StepCtx,
+  opts: HardeningStepOptions,
+): Promise<void> {
+  const installed = await ensureUnzip(conn);
+  if (installed && !ctx.state.installedPackages.includes("unzip")) {
+    ctx.state.installedPackages.push("unzip");
+    await opts.persistState?.(ctx.state);
+  }
+}
+
+/** Download ZIP + digest and verify the ZIP's SHA2-256.
+ *  Throws on any failure (missing digest, mismatch) after removing the
+ *  downloaded artifacts. */
 async function downloadAndVerify(conn: SshConn, version: string): Promise<void> {
   const zipUrl = XRAY_ZIP_URL(version);
   await conn.run(`mkdir -p ${DOWNLOAD_DIR}`, { timeoutMs: 10_000 });
@@ -170,14 +186,27 @@ async function extractAndInstall(conn: SshConn): Promise<void> {
   }
 }
 
-/** Upload unit + daemon-reload + enable (only when content differs). */
+/** Upload unit + daemon-reload + enable (only when content differs), and
+ *  re-assert the ENABLED state in both branches (stale-unit path and
+ *  already-correct path): a box whose unit was disabled out-of-band would
+ *  otherwise pass `deploy` and silently stop starting xray on the next
+ *  reboot. Returns true when anything changed. */
 async function ensureUnit(conn: SshConn): Promise<boolean> {
   const unitOut = await conn.run(`cat ${XRAY_UNIT} 2>/dev/null`, { timeoutMs: 10_000 });
-  if (unitOut.stdout === renderXrayUnit()) return false;
-  await uploadRendered(conn, renderXrayUnit(), XRAY_UNIT, "xray.service");
-  await conn.run("systemctl daemon-reload", { timeoutMs: 30_000 });
-  await conn.run("systemctl enable xray", { timeoutMs: 30_000 });
-  return true;
+  let changed = unitOut.stdout !== renderXrayUnit();
+  if (changed) {
+    await uploadRendered(conn, renderXrayUnit(), XRAY_UNIT, "xray.service");
+    await conn.run("systemctl daemon-reload", { timeoutMs: 30_000 });
+  }
+  const enabled = await conn.run("systemctl is-enabled xray 2>/dev/null", { timeoutMs: 30_000 });
+  if (enabled.code !== 0 || enabled.stdout.trim() !== "enabled") {
+    const en = await conn.run("systemctl enable xray", { timeoutMs: 30_000 });
+    if (en.code !== 0) {
+      throw new Error(`systemctl enable xray failed: ${errDetail(en.stderr)}`);
+    }
+    changed = true;
+  }
+  return changed;
 }
 
 async function doInstall(conn: SshConn, ctx: StepCtx, opts: HardeningStepOptions): Promise<StepResult> {
@@ -194,7 +223,7 @@ async function doInstall(conn: SshConn, ctx: StepCtx, opts: HardeningStepOptions
     const geoFiles = new Set(geoOut.stdout.split("\n").map((s) => s.trim()).filter(Boolean));
     let geoChanged = false;
     if (!geoFiles.has("geoip.dat") || !geoFiles.has("geosite.dat")) {
-      await ensureUnzip(conn);
+      await ensureUnzipRecorded(conn, ctx, opts);
       await downloadAndVerify(conn, ctx.config.xray);
       await extractAndInstall(conn);
       await conn.run(`rm -rf ${DOWNLOAD_DIR}`, { timeoutMs: 10_000 });
@@ -207,11 +236,7 @@ async function doInstall(conn: SshConn, ctx: StepCtx, opts: HardeningStepOptions
   }
 
   // Fresh install or in-place upgrade.
-  const installedUnzip = await ensureUnzip(conn);
-  if (installedUnzip && !ctx.state.installedPackages.includes("unzip")) {
-    ctx.state.installedPackages.push("unzip");
-    await opts.persistState?.(ctx.state);
-  }
+  await ensureUnzipRecorded(conn, ctx, opts);
 
   await downloadAndVerify(conn, ctx.config.xray);
   await extractAndInstall(conn);

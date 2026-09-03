@@ -316,7 +316,7 @@ test("verify-sub: served and decodes (vless + pbk + routing)", async () => {
   assert.equal(res.status, "ok");
 });
 
-test("verify-sub: wrong pbk in the served blob — failed", async () => {
+test("verify-sub: wrong pbk in the served blob — failed (byte-match)", async () => {
   const remote = new FakeRemote();
   await deploy(remote);
   const bad = Buffer.from(
@@ -326,10 +326,10 @@ test("verify-sub: wrong pbk in the served blob — failed", async () => {
   remote.files.set("/var/www/viper/main/sub.txt", bad);
   const res = await verifySubStep().run(remote, ctx());
   assert.equal(res.status, "failed");
-  assert.match(res.detail ?? "", /pbk/);
+  assert.match(res.detail ?? "", /does not byte-match the locally rendered subscription/);
 });
 
-test("verify-sub: missing routing line — failed", async () => {
+test("verify-sub: missing routing line — failed (byte-match)", async () => {
   const remote = new FakeRemote();
   await deploy(remote);
   const noRouting = Buffer.from(
@@ -339,7 +339,17 @@ test("verify-sub: missing routing line — failed", async () => {
   remote.files.set("/var/www/viper/main/sub.txt", noRouting);
   const res = await verifySubStep().run(remote, ctx());
   assert.equal(res.status, "failed");
-  assert.match(res.detail ?? "", /routing line/);
+  assert.match(res.detail ?? "", /does not byte-match the locally rendered subscription/);
+});
+
+test("verify-sub: truncation of the served blob — failed (byte-match)", async () => {
+  const remote = new FakeRemote();
+  await deploy(remote);
+  const full = remote.files.get("/var/www/viper/main/sub.txt") as string;
+  remote.files.set("/var/www/viper/main/sub.txt", full.slice(0, Math.floor(full.length * 0.8)));
+  const res = await verifySubStep().run(remote, ctx());
+  assert.equal(res.status, "failed");
+  assert.match(res.detail ?? "", /does not byte-match the locally rendered subscription/);
 });
 
 test("verify-404: unknown path 404s", async () => {

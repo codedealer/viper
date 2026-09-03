@@ -179,14 +179,17 @@ export async function collectStatus(
         timeoutMs: 15_000,
       }).catch(() => undefined),
       conn.run("uptime -p", { timeoutMs: 15_000 }).catch(() => undefined),
-      conn.run("top -bn1", { timeoutMs: 20_000 }).catch(() => undefined),
+      conn.run("LC_ALL=C top -bn1", { timeoutMs: 20_000 }).catch(() => undefined),
       conn.run("free -m", { timeoutMs: 15_000 }).catch(() => undefined),
       conn.run("df -m /", { timeoutMs: 15_000 }).catch(() => undefined),
-      conn
-        .run(`${XRAY_BIN} api statsquery --server=${statsApiFromRendered(config, state)}`, {
-          timeoutMs: 30_000,
-        })
-        .catch(() => undefined),
+      (async () => {
+        // statsApiFromRendered throws synchronously when the rendered
+        // config has no api.listen — keep it inside the promise so it
+        // degrades to undefined like every other command instead of
+        // rejecting the whole snapshot.
+        const api = statsApiFromRendered(config, state);
+        return conn.run(`${XRAY_BIN} api statsquery --server=${api}`, { timeoutMs: 30_000 });
+      })().catch(() => undefined),
       conn
         .run(`stat -c %y /var/www/viper/${config.name}/sub.txt 2>/dev/null`, {
           timeoutMs: 15_000,

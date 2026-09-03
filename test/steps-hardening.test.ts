@@ -17,6 +17,7 @@ import {
 } from "../src/steps/hardening.js";
 import { FakeRemote } from "./fake-remote.js";
 import { fixtureConfig, fixtureState } from "./fixtures.js";
+import { runSteps } from "../src/steps/runner.js";
 import type { StepCtx } from "../src/steps/runner.js";
 import { assertGolden } from "./golden.js";
 
@@ -103,6 +104,14 @@ test("auto-upgrades: matching content already present → ok", async () => {
   assert.equal(remote.uploads.length, 0);
 });
 
+test("auto-upgrades: SFTP upload failure → step reports failed (runSteps)", async () => {
+  const remote = new FakeRemote({ uploadFails: "sftp: session closed" });
+  const report = await runSteps([autoUpgradesStep()], remote, ctx(), { quiet: true });
+  assert.equal(report.failed, true);
+  assert.equal(report.results[0]?.status, "failed");
+  assert.match(report.results[0]?.detail ?? "", /sftp: session closed/);
+});
+
 // ------------------------------------------------------------------ ssh
 
 test("ssh: fresh box → drop-in written, neutralized, validated, effective-checked, restarted; second run ok", async () => {
@@ -177,6 +186,75 @@ test("ssh: already hardened → ok, zero mutations", async () => {
   assert.equal(res.status, "ok");
   assert.deepEqual(remote.mutatingCommands(), []);
   assert.ok(!remote.commands.some((x) => x.startsWith("systemctl restart")));
+});
+
+test("ssh: conflicting drop-in neutralized on re-check → changed + restart (recovery)", async () => {
+  // A conflicting directive appeared in another drop-in AFTER viper's last
+  // write; the idempotent neutralize loop fixes it, so the step recovers
+  // instead of failing.
+  const remote = new FakeRemote({
+    sshdDropinFile: renderSshdDropin(),
+    effectiveSsh: {
+      passwordauthentication: "yes",
+      kbdinteractiveauthentication: "no",
+      debianbanner: "no",
+    },
+    effectiveSshAfterNeutralize: {
+      passwordauthentication: "no",
+      kbdinteractiveauthentication: "no",
+      debianbanner: "no",
+    },
+  });
+  const res = await sshStep().run(remote, ctx());
+  assert.equal(res.status, "changed");
+  assert.match(res.detail ?? "", /conflicting drop-in neutralized, sshd restarted/);
+  // Drop-in already matched → the neutralize ran exactly once (the
+  // mismatch re-run), and the restart happened AFTER the re-check.
+  const neutralizes = remote.commands.filter((x) => x.startsWith("for f in /etc/ssh/sshd_config.d"));
+  assert.equal(neutralizes.length, 1);
+  const restartIdx = remote.commands.findIndex((x) => x.startsWith("systemctl restart sshd"));
+  assert.ok(restartIdx >= 0, "restart issued");
+  assert.ok(
+    restartIdx > remote.commands.lastIndexOf("sshd -T 2>/dev/null"),
+    "restart after the final effective check",
+  );
+});
+
+test("ssh: conflicting drop-in NOT fixed by neutralize → failed with drop-in hint, no restart", async () => {
+  const remote = new FakeRemote({
+    sshdDropinFile: renderSshdDropin(),
+    effectiveSsh: {
+      passwordauthentication: "yes",
+      kbdinteractiveauthentication: "no",
+      debianbanner: "no",
+    },
+  });
+  const res = await sshStep().run(remote, ctx());
+  assert.equal(res.status, "failed");
+  assert.match(res.detail ?? "", /effective sshd setting mismatch/);
+  assert.match(res.detail ?? "", /sshd_config\.d/);
+  // The neutralize loop ran twice (it did not fix the mismatch) — bounded.
+  const neutralizes = remote.commands.filter((x) => x.startsWith("for f in /etc/ssh/sshd_config.d"));
+  assert.equal(neutralizes.length, 1, "re-run at most once");
+  assert.ok(!remote.commands.some((x) => x.startsWith("systemctl restart")));
+});
+
+test("ssh: fresh box with conflicting drop-in → write + neutralize recovers", async () => {
+  const remote = new FakeRemote({
+    effectiveSsh: {
+      passwordauthentication: "yes",
+      kbdinteractiveauthentication: "no",
+      debianbanner: "no",
+    },
+    effectiveSshAfterNeutralize: {
+      passwordauthentication: "no",
+      kbdinteractiveauthentication: "no",
+      debianbanner: "no",
+    },
+  });
+  const res = await sshStep().run(remote, ctx());
+  assert.equal(res.status, "changed");
+  assert.ok(remote.uploads.some((u) => u.remote === SSHD_DROPIN_PATH), "drop-in written");
 });
 
 // ------------------------------------------------------------- fail2ban
@@ -262,6 +340,39 @@ test("bbr: cc=bbr but qdisc not fq → re-applies and persists", async () => {
   const res = await bbrStep().run(remote, ctx());
   assert.equal(res.status, "changed");
   assert.ok(remote.commands.some((x) => x === "sysctl -w net.core.default_qdisc=fq"));
+});
+
+test("bbr: live bbr+fq but persist file missing → persisted (changed); second run ok", async () => {
+  // A previous run set the live sysctls but died before the SFTP persist
+  // — the ok-path must re-check the persist file (a live-only box loses
+  // BBR on the next reboot).
+  const remote = new FakeRemote({
+    sysctl: { "net.ipv4.tcp_congestion_control": "bbr", "net.core.default_qdisc": "fq" },
+  });
+  const c = ctx();
+  const first = await bbrStep().run(remote, c);
+  assert.equal(first.status, "changed");
+  assert.match(first.detail ?? "", /persisted to \/etc\/sysctl\.d\/99-viper\.conf/);
+  const up = remote.uploads.find((u) => u.remote === BBR_SYCTL_PATH);
+  assert.ok(up !== undefined, "persist file uploaded");
+  assert.equal(up?.content, renderBbrSysctlConf());
+  assert.ok(!remote.commands.some((x) => x.startsWith("sysctl -w")), "no re-apply of live sysctls");
+
+  const second = await bbrStep().run(remote, c);
+  assert.equal(second.status, "ok");
+  assert.equal(remote.uploads.length, 1, "no re-upload on the idempotent run");
+});
+
+test("bbr: live bbr+fq with stale persist file → re-persisted", async () => {
+  const remote = new FakeRemote({
+    sysctl: { "net.ipv4.tcp_congestion_control": "bbr", "net.core.default_qdisc": "fq" },
+    autoUpgradesFile: "stale",
+  });
+  // Seed a stale 99-viper.conf directly.
+  remote.files.set(BBR_SYCTL_PATH, "# stale\nnet.ipv4.tcp_congestion_control = bbr\n");
+  const res = await bbrStep().run(remote, ctx());
+  assert.equal(res.status, "changed");
+  assert.equal(remote.files.get(BBR_SYCTL_PATH), renderBbrSysctlConf());
 });
 
 // ----------------------------------------------------------------- ufw
@@ -367,6 +478,19 @@ test("ufw: user rules are never touched (only viper's allows issued)", async () 
     assert.ok(!c.includes("delete"), `no rule deletion: ${c}`);
   }
   assert.ok(!remote.commands.some((x) => x.includes("3389")));
+});
+
+test("ufw: sshd port equals 443 → 443/tcp allowed exactly once (no duplicate)", async () => {
+  const remote = new FakeRemote({ sshdPorts: [443] });
+  const c = ctx({ config: { ...fixtureConfig, sshPort: 443 } });
+  const res = await ufwStep().run(remote, c);
+  assert.equal(res.status, "changed");
+  assert.equal(
+    remote.commands.filter((x) => x === "ufw allow 443/tcp").length,
+    1,
+    "443 allowed exactly once",
+  );
+  assert.ok(remote.commands.includes("ufw allow 80/tcp"));
 });
 
 // ------------------------------------------------------- hardeningSteps

@@ -229,7 +229,8 @@ class SshConnection implements SshConn {
 
   async close(): Promise<void> {
     if (this.closed) return;
-    this.closed = true;    const sftp = this.sftp;
+    this.closed = true;
+    const sftp = this.sftp;
     const client = this.client;
     this.sftp = null;
     this.client = null;

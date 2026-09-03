@@ -372,8 +372,11 @@ export function verifyPageStep(): Step {
   };
 }
 
-/** 9b — D8: the subscription is served and decodes to the expected blob
- *  (vless lines with our pbk + the Happ routing line). */
+/** 9b — D8: the subscription is served and is BYTE-IDENTICAL to the
+ *  locally rendered artifact (vless lines with our pbk + the Happ routing
+ *  line). The served file is exactly the SFTP-uploaded base64 blob, so an
+ *  exact-body compare is the strongest available check: any mangling
+ *  (truncation, re-encoding, a stale render) fails the step. */
 export function verifySubStep(): Step {
   return {
     name: "Verify subscription (public path)",
@@ -388,20 +391,17 @@ export function verifySubStep(): Step {
         };
       }
       const bodyRes = await conn.run(publicCurl(ctx, path, false), { timeoutMs: 60_000 });
-      const decoded = Buffer.from(bodyRes.stdout.trim(), "base64").toString("utf8");
-      if (!decoded.includes("vless://")) {
-        return { status: "failed", detail: "sub.txt does not decode to a vless:// line" };
-      }
-      if (!decoded.includes(`pbk=${ctx.state.reality.publicKey}`)) {
+      const expected = renderSub(ctx.config, ctx.state).base64;
+      if (bodyRes.stdout.trim() !== expected.trim()) {
         return {
           status: "failed",
-          detail: "sub.txt vless line does not carry the state reality pbk",
+          detail:
+            `sub.txt does not byte-match the locally rendered subscription ` +
+            `(served ${bodyRes.stdout.trim().length} bytes, expected ${expected.length} ` +
+            `— vless line with the state reality pbk + Happ routing line)`,
         };
       }
-      if (!decoded.includes("happ://routing/onadd/")) {
-        return { status: "failed", detail: "sub.txt is missing the Happ routing line" };
-      }
-      return { status: "ok", detail: "subscription served, decodes (vless + pbk + routing line)" };
+      return { status: "ok", detail: "subscription served, byte-identical to the local render" };
     },
   };
 }

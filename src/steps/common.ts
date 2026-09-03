@@ -37,17 +37,27 @@ export interface HardeningStepOptions {
 }
 
 /**
+ * Error-code mapping for DNS lookups (used by `defaultDnsResolver`):
+ * `ENOTFOUND`/`ENODATA` mean "the name exists but has no A record" -> `[]`.
+ * Every other code is re-thrown — `EAI_AGAIN` in particular is a
+ * *transient local resolver failure*, not a missing record, and must not
+ * be reported as "create an A record" (it means "check your local
+ * network/DNS").
+ */
+export function noRecordOrRethrow(err: unknown): string[] | never {
+  const code = (err as { code?: string }).code;
+  if (code === "ENOTFOUND" || code === "ENODATA") return [];
+  throw err;
+}
+
+/**
  * Default DNS seam: Node's built-in resolver. "No A record" errors are
  * mapped to an empty list (a legitimate deploy state with its own
- * message); other failures (network down, resolver error) throw and are
- * reported distinctly by the preflight step.
+ * message); other failures (network down, resolver error, `EAI_AGAIN`)
+ * throw and are reported distinctly by the preflight step.
  */
 export const defaultDnsResolver: DnsResolver = (domain) =>
-  resolve4(domain).catch((err: NodeJS.ErrnoException) => {
-    const code = (err as { code?: string }).code;
-    if (code === "ENOTFOUND" || code === "ENODATA" || code === "EAI_AGAIN") return [];
-    throw err;
-  });
+  resolve4(domain).catch(noRecordOrRethrow);
 
 /**
  * Parse sshd port(s) from command output (Meridian's _parse_ssh_ports

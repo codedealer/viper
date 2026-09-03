@@ -47,7 +47,7 @@ export function deploySteps(
 ): Step[] {
   return [
     ...hardeningSteps(ctx, config, opts),
-    ...xraySteps(ctx, config, opts),
+    ...xraySteps(opts),
     ...nginxSteps(ctx, config, opts),
   ];
 }
@@ -77,5 +77,5 @@ export function updateSteps(
  * deliberately NOT deleted (re-deploy stays possible).
  */
 export function teardownSteps(ctx: StepCtx): Step[] {
-  return [...xrayTeardownSteps(ctx), ...nginxTeardownSteps(ctx)];
+  return [...xrayTeardownSteps(), ...nginxTeardownSteps(ctx)];
 }

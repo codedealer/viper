@@ -9,10 +9,8 @@
  * `xrayTeardownSteps` — exported for M7's `viper teardown`; NOT
  * executed live in the M5 loop.
  */
-import type { Step, StepCtx } from "./runner.js";
-import type { ServerConfig } from "../config.js";
-import type { HardeningStepOptions } from "./common.js";
-import type { PollOptions } from "./common.js";
+import type { Step } from "./runner.js";
+import type { HardeningStepOptions, PollOptions } from "./common.js";
 import { xrayInstallStep } from "./xray-install.js";
 import { xrayDeployStep } from "./xray-deploy.js";
 import { xrayUnitActiveStep, xrayListeningStep, xrayHandshakeProbeStep } from "./xray-verify.js";
@@ -23,7 +21,9 @@ export interface XrayStepOptions extends HardeningStepOptions {
   poll?: PollOptions;
 }
 
-export function xraySteps(_ctx: StepCtx, _config: ServerConfig, opts: XrayStepOptions = {}): Step[] {
+/** The M5 deploy steps in pipeline order. The steps read everything they
+ *  need from the StepCtx at run time, so no ctx/config is passed here. */
+export function xraySteps(opts: XrayStepOptions = {}): Step[] {
   return [
     xrayInstallStep(opts),
     xrayDeployStep(opts.poll),
@@ -33,6 +33,8 @@ export function xraySteps(_ctx: StepCtx, _config: ServerConfig, opts: XrayStepOp
   ];
 }
 
-export function xrayTeardownSteps(ctx: StepCtx): Step[] {
+/** M5 teardown: remove the xray footprint. Nothing is kept (unlike M6's
+ *  nginx/acme, where the nginx package and .acme.sh survive). */
+export function xrayTeardownSteps(): Step[] {
   return [xrayTeardownStep()];
 }

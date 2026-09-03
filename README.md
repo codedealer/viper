@@ -141,6 +141,14 @@ state-pinned `shortId` are preserved.
   hardening (ufw, sshd drop-in, fail2ban, BBR, unattended-upgrades) —
   un-hardening is out of scope. The local `state/<name>.yml` is also kept, so
   re-deploy stays possible.
+- **Cert + renewal caveat (read before decommissioning).** Teardown removes
+  the acme.sh *renewal cron entry* only — `/root/.acme.sh/` (the issued cert
+  **and its private key**) is never touched by viper. Without the cron, the
+  surviving cert is **not auto-renewed** and will expire (~90 days after it
+  was issued) unless another mechanism takes over renewal.
+
+  **Sensitivity:** `/root/.acme.sh/<domain>/` holds the private key. If it is
+  lost, re-issuing is a *new* certificate. **Back up `/root/.acme.sh/<domain>/` manually before decommissioning a VPS**; viper-side cert backup/export is deliberately out of scope for v1 (backups are manual).
 
 ## Security notes
 

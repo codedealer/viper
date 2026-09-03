@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { deploySteps, updateSteps, teardownSteps } from "../src/pipeline.js";
+import { runSteps } from "../src/steps/runner.js";
+import { ACME_CRON_CMD } from "../src/steps/nginx.js";
+import { FakeRemote } from "./fake-remote.js";
 import { fixtureConfig, fixtureState } from "./fixtures.js";
 import type { StepCtx } from "../src/steps/runner.js";
 
@@ -99,4 +102,73 @@ test("teardownSteps: xray teardown then nginx teardown (contract D6)", () => {
     "Remove acme renewal cron (teardown)",
     "Remove viper web files (teardown)",
   ]);
+});
+
+// ------------------------------------------------- R11.3: full run-twice
+
+const ACME_SH = "/root/.acme.sh/acme.sh";
+const DOMAIN = fixtureConfig.domain;
+
+/**
+ * Full pipeline execution (not just composition): run the WHOLE
+ * `deploySteps` list twice against a stateful FakeRemote. Run 1 changes
+ * the box; run 2 must be idempotent — the only mutations allowed are the
+ * probe's own kill/rm and the two documented always-runners (acme-cron
+ * D3, install-cert D4).
+ */
+test("deploySteps: full pipeline run twice — run 2 idempotent (R11.3)", async () => {
+  const remote = new FakeRemote({ listeningPorts: [443] });
+  const c: StepCtx = {
+    name: "main",
+    ip: fixtureConfig.ip,
+    config: fixtureConfig,
+    state: { ...fixtureState, installedPackages: [] },
+    artifacts: {},
+  };
+
+  const report1 = await runSteps(deploySteps(c, fixtureConfig, {
+    heroBase64: "aGVsbG8=",
+    dnsResolver: async () => [fixtureConfig.ip],
+  }), remote, c, {
+    quiet: true,
+  });
+  assert.equal(report1.failed, false, `run 1 failed: ${JSON.stringify(report1.results)}`);
+
+  const mutBefore = remote.mutatingCommands().length;
+  const cmdBefore = remote.commands.length;
+  const report2 = await runSteps(
+    deploySteps(c, fixtureConfig, {
+      heroBase64: "aGVsbG8=",
+      dnsResolver: async () => [fixtureConfig.ip],
+    }),
+    remote,
+    c,
+    { quiet: true },
+  );
+  assert.equal(report2.failed, false, `run 2 failed: ${JSON.stringify(report2.results)}`);
+
+  // Run 2's mutating surface is exactly: probe reap/teardown + the two
+  // always-runners (acme-cron D3, install-cert D4).
+  const expectedRun2Mutations = [
+    "pkill -f 'xray run -c /tmp/viper-probe/[c]onfig.json' 2>/dev/null || true",
+    "kill 12345 2>/dev/null",
+    "rm -rf /tmp/viper-probe",
+    ACME_CRON_CMD,
+    `${ACME_SH} --issue -d ${DOMAIN} --server letsencrypt --webroot /var/www/acme --keylength 2048 2>&1`,
+    `${ACME_SH} --install-cert -d ${DOMAIN} --key-file /etc/nginx/ssl/${DOMAIN}/privkey.pem --fullchain-file /etc/nginx/ssl/${DOMAIN}/fullchain.pem --reloadcmd "systemctl reload nginx" 2>&1`,
+  ];
+  assert.deepEqual(remote.mutatingCommands().slice(mutBefore), expectedRun2Mutations);
+
+  // No hardening re-mutations on the idempotent run.
+  const run2 = remote.commands.slice(cmdBefore);
+  assert.ok(!run2.some((x) => x.startsWith("systemctl restart sshd")), "no sshd restart");
+  assert.ok(!run2.some((x) => x.startsWith("sysctl -w")), "no sysctl re-apply");
+  assert.ok(
+    !run2.some(
+      (x) => x.startsWith("ufw allow ") || x.startsWith("ufw default ") || x === "ufw --force enable",
+    ),
+    "no ufw re-mutations",
+  );
+  assert.ok(!run2.some((x) => x === "systemctl restart xray"), "no xray restart");
+  assert.ok(!run2.some((x) => x.includes("apt-get ")), "no apt activity");
 });

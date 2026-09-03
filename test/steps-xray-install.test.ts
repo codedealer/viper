@@ -129,6 +129,33 @@ test("install: pinned version but geo assets missing — re-download + repair", 
   assert.ok(remote.commands.includes("cp /tmp/viper-xray/geoip.dat /usr/local/share/xray/geoip.dat"));
 });
 
+test("install: geo repair without unzip — installs + records unzip (R10.1)", async () => {
+  const remote = new FakeRemote({
+    xrayInstalled: true,
+    xrayGeoMissing: true,
+    xrayUnitFile: renderXrayUnit(),
+    unzipInstalled: false,
+  });
+  const c = ctx();
+  const res = await xrayInstallStep().run(remote, c);
+  assert.equal(res.status, "changed");
+  assert.ok(remote.commands.includes("cp /tmp/viper-xray/geoip.dat /usr/local/share/xray/geoip.dat"));
+  assert.deepEqual(c.state.installedPackages, ["unzip"], "geo-repair path records unzip");
+});
+
+test("install: unit present but DISABLED — re-enabled, no re-upload (R10.2)", async () => {
+  const remote = new FakeRemote({
+    xrayInstalled: true,
+    xrayUnitFile: renderXrayUnit(),
+    xrayUnitEnabled: false,
+  });
+  const res = await xrayInstallStep().run(remote, ctx());
+  assert.equal(res.status, "changed");
+  assert.ok(remote.commands.includes("systemctl enable xray"), "disabled unit re-enabled");
+  assert.ok(!remote.commands.includes("systemctl daemon-reload"), "content unchanged → no reload");
+  assert.equal(remote.uploads.length, 0, "unit content unchanged → no upload");
+});
+
 test("install: SHA2-256 mismatch — hard fail, nothing installed", async () => {
   const remote = new FakeRemote({ sha256Mismatch: true });
   const res = await xrayInstallStep().run(remote, ctx());
