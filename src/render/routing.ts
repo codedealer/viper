@@ -10,11 +10,10 @@ import type { RoutingConfig } from "../config.js";
  * on subscription import (zero-config), and re-imports update it in place
  * (same name → atomic geofile swap, no client action).
  *
- * With no config (no-arg calls): the documented Happ **default profile**,
- * verbatim (routing.md "Example Default Profile") — the M1.5 behavior.
- * With a `RoutingConfig`: the documented default profile with the user's
- * validated overrides merged on top, plus the required `Name` (M8,
- * decisions 3 + 6: server-side defaults, name always shipped explicitly).
+ * The profile is the documented Happ default profile (routing.md
+ * "Example Default Profile") with the user's validated overrides merged on
+ * top, plus the required `Name` (M8, decisions 3 + 6: server-side
+ * defaults, name always shipped explicitly).
  *
  * Pure function: no I/O, deterministic output.
  */
@@ -48,14 +47,12 @@ function defaultProfile(): Record<string, unknown> {
 }
 
 /**
- * Render the Happ routing profile. No arg → the documented default profile
- * (M1.5, no `Name`). With a `RoutingConfig` → default + `Name` + the user's
- * explicit overrides; yml booleans are normalized to Happ's string
- * `"true"`/`"false"` here.
+ * Render the Happ routing profile: the documented default profile +
+ * `Name` + the user's explicit overrides; yml booleans are normalized to
+ * Happ's string `"true"`/`"false"` here.
  */
-export function renderRoutingProfile(routing?: RoutingConfig): Record<string, unknown> {
+export function renderRoutingProfile(routing: RoutingConfig): Record<string, unknown> {
   const profile = defaultProfile();
-  if (routing === undefined) return profile;
   const merged: Record<string, unknown> = { Name: routing.name, ...profile };
   for (const [key, value] of Object.entries(routing.profile)) {
     merged[key] = typeof value === "boolean" ? (value ? "true" : "false") : value;
@@ -67,7 +64,7 @@ export function renderRoutingProfile(routing?: RoutingConfig): Record<string, un
  * The `happ://routing/onadd/{base64}` line that rides in `sub.txt`
  * (never in copy-paste `vless://` link output).
  */
-export function renderRoutingLine(routing?: RoutingConfig): string {
+export function renderRoutingLine(routing: RoutingConfig): string {
   const json = JSON.stringify(renderRoutingProfile(routing));
   return `happ://routing/onadd/${Buffer.from(json, "utf8").toString("base64")}`;
 }

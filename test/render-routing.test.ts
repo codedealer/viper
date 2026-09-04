@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { RoutingConfig } from "../src/config.js";
 import { renderRoutingLine, renderRoutingProfile } from "../src/render/routing.js";
-import { assertGolden } from "./golden.js";
 
 const PREFIX = "happ://routing/onadd/";
 
@@ -33,61 +32,6 @@ const DEFAULT_PROFILE = {
   DomainStrategy: "IPIfNonMatch",
   FakeDNS: "false",
 };
-
-test("routing line — golden + documented profile decodes from it", () => {
-  const line = renderRoutingLine();
-  assertGolden(import.meta.url, "routing-line.txt", line + "\n");
-  assert.ok(line.startsWith(PREFIX));
-
-  const b64 = line.slice(PREFIX.length);
-  assert.match(b64, /^[A-Za-z0-9+/]+=*$/);
-  const profile = JSON.parse(Buffer.from(b64, "base64").toString("utf8")) as Record<string, unknown>;
-
-  // Golden of the decoded profile (pretty-printed for diffability).
-  assertGolden(import.meta.url, "routing-profile.json", JSON.stringify(profile, null, 4) + "\n");
-});
-
-test("profile matches the documented Happ default profile exactly", () => {
-  const p = renderRoutingProfile();
-  assert.deepEqual(p, DEFAULT_PROFILE);
-});
-
-test("only documented field names are used", () => {
-  const documented = new Set([
-    "Name",
-    "GlobalProxy",
-    "RemoteDNSType",
-    "RemoteDNSDomain",
-    "RemoteDNSIP",
-    "DomesticDNSType",
-    "DomesticDNSDomain",
-    "DomesticDNSIP",
-    "Geoipurl",
-    "Geositeurl",
-    "LastUpdated",
-    "DnsHosts",
-    "DirectSites",
-    "DirectIp",
-    "ProxySites",
-    "ProxyIp",
-    "BlockSites",
-    "BlockIp",
-    "DomainStrategy",
-    "FakeDNS",
-  ]);
-  for (const key of Object.keys(renderRoutingProfile())) {
-    assert.ok(documented.has(key), `undocumented profile field: ${key}`);
-  }
-});
-
-test("renderer is pure and deterministic", () => {
-  assert.equal(renderRoutingLine(), renderRoutingLine());
-  assert.deepEqual(renderRoutingProfile(), renderRoutingProfile());
-  // re-rendering never mutates the profile object the caller sees
-  const a = renderRoutingProfile();
-  a.DirectIp = ["hacked"];
-  assert.deepEqual((renderRoutingProfile().DirectIp as string[])[0], "10.0.0.0/8");
-});
 
 // ------------------------------------------------------------------- M8
 

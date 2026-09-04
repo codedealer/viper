@@ -151,10 +151,9 @@ test("sub: prints the subscription (local only) and creates state 600", async ()
 
 // ------------------------------------------------------------- rotate
 
-test("sub: routing line printed only when the config ships one (M8)", async () => {
-  // with a routing: block the tail prints the happ line
-  let dir = await tempProject({ "viper.main.yml": CONFIG_YML_ROUTING });
-  let logs: string[] = [];
+test("sub: routing block present → routing line printed (M8)", async () => {
+  const dir = await tempProject({ "viper.main.yml": CONFIG_YML_ROUTING });
+  const logs: string[] = [];
   const original = console.log;
   console.log = (...args: unknown[]) => logs.push(args.join(" "));
   try {
@@ -165,9 +164,12 @@ test("sub: routing line printed only when the config ships one (M8)", async () =
     console.log = original;
     await rm(dir, { recursive: true, force: true });
   }
-  // without one it is absent from the output
-  dir = await tempProject({ "viper.main.yml": CONFIG_YML });
-  logs = [];
+});
+
+test("sub: routing block absent → no routing line printed (M8)", async () => {
+  const dir = await tempProject({ "viper.main.yml": CONFIG_YML });
+  const logs: string[] = [];
+  const original = console.log;
   console.log = (...args: unknown[]) => logs.push(args.join(" "));
   try {
     await command("sub")(dir, {});
