@@ -25,6 +25,8 @@ export const fixtureConfig: ServerConfig = {
   harden: true,
   bbr: true,
   clients: [{ name: "default", limitIp: 2 }],
+  // M8: routing present (opt-in) — the fixture exercises the shipped-line path.
+  routing: { name: "Viper", profile: {} },
 };
 
 export const fixtureState: State = {

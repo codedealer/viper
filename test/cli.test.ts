@@ -61,6 +61,17 @@ clients:
   - name: default
 `;
 
+const CONFIG_YML_ROUTING = `ip: 203.0.113.10
+domain: vpn.example.com
+xray: v26.3.27
+routing:
+  name: Viper
+  BlockSites:
+    - geosite:ads
+clients:
+  - name: default
+`;
+
 test("openServer: --ip override applies to the effective ip, prints a notice, no file writes", async () => {
   const dir = await tempProject({ "viper.main.yml": CONFIG_YML });
   const logs: string[] = [];
@@ -139,6 +150,33 @@ test("sub: prints the subscription (local only) and creates state 600", async ()
 });
 
 // ------------------------------------------------------------- rotate
+
+test("sub: routing line printed only when the config ships one (M8)", async () => {
+  // with a routing: block the tail prints the happ line
+  let dir = await tempProject({ "viper.main.yml": CONFIG_YML_ROUTING });
+  let logs: string[] = [];
+  const original = console.log;
+  console.log = (...args: unknown[]) => logs.push(args.join(" "));
+  try {
+    await command("sub")(dir, {});
+    const out = logs.join("\n");
+    assert.ok(out.includes("happ://routing/onadd/"), out);
+  } finally {
+    console.log = original;
+    await rm(dir, { recursive: true, force: true });
+  }
+  // without one it is absent from the output
+  dir = await tempProject({ "viper.main.yml": CONFIG_YML });
+  logs = [];
+  console.log = (...args: unknown[]) => logs.push(args.join(" "));
+  try {
+    await command("sub")(dir, {});
+    assert.ok(!logs.join("\n").includes("happ://"), logs.join("\n"));
+  } finally {
+    console.log = original;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 test("rotate: requires an existing state file", async () => {
   const dir = await tempProject({ "viper.main.yml": CONFIG_YML });

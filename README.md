@@ -57,7 +57,13 @@ anything touches the server.
    ```
    Subscription: https://vpn.example.com/<subHash>/sub.txt
    vless://<uuid>@vpn.example.com:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=...&fp=chrome&pbk=...&sid=...&type=tcp&headerType=none#default
-   happ://routing/onadd/<base64 routing config>
+   ```
+
+   If the config has a `routing:` block, the tail (and the `sub.txt` body)
+   additionally carry the Happ routing profile line:
+
+   ```
+   happ://routing/onadd/<base64 routing profile>
    ```
 
 6. **Verify**: `pnpm viper status --name main` — live panel showing Xray
@@ -108,6 +114,35 @@ validator stay in sync.
 | `harden` | bool | `true` | Gates the hardening steps (timezone, unattended-upgrades, sshd hardening, fail2ban, ufw). |
 | `bbr` | bool | `true` | Gates the BBR congestion-control step. |
 | `clients` | list | `[{ name: default }]` | One entry per user: `name` (unique; used as the stat label + subscription tag) and `limitIp` (0–65535, default `0` = unlimited concurrent IPs). Each client gets a UUID in `state/<name>.yml`. |
+| `routing` | block | absent | **Opt-in Happ routing profile.** Presence = ship a `happ://routing/onadd/{base64}` line in `sub.txt` (and the deploy/sub tail); absence = no routing line. `name` is required; all other keys are Happ's documented profile field names, validated against that set, and merged over Happ's documented default profile (unset fields keep the defaults). Rule priority is Happ's: block → direct → proxy. |
+
+`routing` block (all profile fields optional — unset fields fall back to
+Happ's documented defaults):
+
+```yaml
+routing:            # absent → no routing line in sub.txt
+  name: Viper       # required; Happ profile name (a stable name makes
+                    # re-imports update the profile in place)
+  GlobalProxy: true             # bool (rendered as "true"/"false")
+  RemoteDNSType: DoH            # DoH | DoU
+  RemoteDNSDomain: https://cloudflare-dns.com/dns-query
+  RemoteDNSIP: 1.1.1.1
+  DomesticDNSType: DoU
+  DomesticDNSDomain: ""         # empty string is legal with DoU
+  DomesticDNSIP: 8.8.8.8
+  Geoipurl: https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
+  Geositeurl: https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat
+  DomainStrategy: IPIfNonMatch  # IPIfNonMatch | AsIs
+  FakeDNS: false                # bool
+  # rule stack — block → direct → proxy (strings or string maps, no syntax validation)
+  BlockSites: ["geosite:ads"]
+  BlockIp: ["geoip:ads"]
+  DirectSites: ["geosite:geolocation-cn"]
+  DirectIp: ["geoip:cn"]
+  ProxySites: []
+  ProxyIp: []
+  # also accepted: LastUpdated, DnsHosts (host → IP map)
+```
 
 ## Stories
 

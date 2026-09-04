@@ -106,7 +106,10 @@ export function buildArtifacts(
   config: ServerConfig,
   state: State,
   heroBase64: string,
-): { files: Record<string, string>; sub: { url: string; lines: string[] } } {
+): {
+  files: Record<string, string>;
+  sub: { url: string; lines: string[]; routingLine?: string };
+} {
   const sub = renderSub(config, state);
   const nginx = renderNginx(config, state);
   return {
@@ -116,7 +119,11 @@ export function buildArtifacts(
       "index.html": renderPage(heroBase64),
       ...nginx,
     },
-    sub: { url: sub.url, lines: sub.lines },
+    sub: {
+      url: sub.url,
+      lines: sub.lines,
+      ...(sub.routingLine !== undefined ? { routingLine: sub.routingLine } : {}),
+    },
   };
 }
 
@@ -199,11 +206,15 @@ function pipelineOpts(projectDir: string, name: string, heroBase64: string): Pip
   };
 }
 
-/** Print the subscription tail (shared by `render` and `sub`). */
-function printSubscription(sub: { url: string; lines: string[] }): void {
+/** Print the subscription tail (shared by `render` and `sub`); the routing
+ *  line is printed only when the config ships one (M8). */
+function printSubscription(sub: { url: string; lines: string[]; routingLine?: string }): void {
   console.log(`Subscription: ${sub.url}`);
   for (const line of sub.lines) {
     console.log(`${line}`);
+  }
+  if (sub.routingLine !== undefined) {
+    console.log(`${sub.routingLine}`);
   }
 }
 
@@ -318,6 +329,9 @@ async function runRotate(projectDir: string, flags: CliFlags): Promise<void> {
   console.log(`  ${sub.url}`);
   for (const line of sub.lines) {
     console.log(`  ${line}`);
+  }
+  if (sub.routingLine !== undefined) {
+    console.log(`  ${sub.routingLine}`);
   }
 }
 

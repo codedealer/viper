@@ -12,6 +12,51 @@ export interface ClientConfig {
 }
 
 /**
+ * One Happ routing rule entry: a bare string (`geosite:ads`, `10.0.0.0/8`)
+ * or a string map, exactly as Happ's docs allow. No syntax validation —
+ * Happ owns rule semantics.
+ */
+export type RoutingRule = string | Record<string, string>;
+
+/**
+ * Happ routing profile fields, pass-through under their documented names
+ * (refs/happ_su/dev-docs/routing.md). All optional: the renderer merges
+ * over the documented default profile.
+ */
+export interface RoutingProfile {
+  GlobalProxy?: boolean;
+  RemoteDNSType?: string;
+  RemoteDNSDomain?: string;
+  RemoteDNSIP?: string;
+  DomesticDNSType?: string;
+  DomesticDNSDomain?: string;
+  DomesticDNSIP?: string;
+  Geoipurl?: string;
+  Geositeurl?: string;
+  LastUpdated?: string;
+  DnsHosts?: Record<string, string>;
+  DirectSites?: RoutingRule[];
+  DirectIp?: RoutingRule[];
+  ProxySites?: RoutingRule[];
+  ProxyIp?: RoutingRule[];
+  BlockSites?: RoutingRule[];
+  BlockIp?: RoutingRule[];
+  DomainStrategy?: string;
+  FakeDNS?: boolean;
+}
+
+/**
+ * The `routing:` config block (M8). Presence = ship a Happ routing profile
+ * in the subscription; absence = no routing line in `sub.txt`.
+ */
+export interface RoutingConfig {
+  /** Happ profile name, shipped verbatim as `Name` (required). */
+  name: string;
+  /** Validated profile overrides (documented Happ field names). */
+  profile: RoutingProfile;
+}
+
+/**
  * A validated `viper.<name>.yml` server definition with defaults applied.
  * Names/domains are used exactly as supplied — viper never derives or
  * prefixes subdomains.
@@ -43,6 +88,8 @@ export interface ServerConfig {
   harden: boolean;
   /** Gates the BBR step (default true). */
   bbr: boolean;
+  /** Absent → no routing line in `sub.txt` (M8 opt-in by presence). */
+  routing?: RoutingConfig;
 }
 
 const SERVER_FILE_RE = /^viper\.([a-z0-9][a-z0-9-]*)\.yml$/;
@@ -146,6 +193,136 @@ function enumField(
   return value;
 }
 
+function optionalBoolField(doc: Record<string, unknown>, key: string, path: string): boolean | undefined {
+  const value = doc[key];
+  if (value === undefined) return undefined;
+  if (typeof value !== "boolean") fail(`${path}.${key}`, "expected a boolean");
+  return value;
+}
+
+function optionalEnumField(
+  doc: Record<string, unknown>,
+  key: string,
+  path: string,
+  allowed: Set<string>,
+): string | undefined {
+  const value = doc[key];
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !allowed.has(value)) {
+    fail(`${path}.${key}`, `expected one of: ${[...allowed].sort().join(", ")}`);
+  }
+  return value;
+}
+
+/**
+ * A pass-through profile string: unlike `stringField`, the empty string is
+ * legal — Happ's documented custom profile uses `"DomesticDNSDomain": ""`
+ * alongside `DomesticDNSType: DoU`.
+ */
+function passthroughStringField(doc: Record<string, unknown>, key: string, path: string): string | undefined {
+  const value = doc[key];
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") fail(`${path}.${key}`, "expected a string");
+  return value;
+}
+
+/** A rule list: strings and/or string maps, per Happ's docs. */
+function ruleListField(doc: Record<string, unknown>, key: string, path: string): RoutingRule[] | undefined {
+  const value = doc[key];
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    fail(`${path}.${key}`, "expected a list of rules (strings or string maps)");
+  }
+  return value.map((item, i) => {
+    const ipath = `${path}.${key}[${i}]`;
+    if (typeof item === "string") return item;
+    const m = asRecord(item, ipath);
+    for (const [k, v] of Object.entries(m)) {
+      if (typeof v !== "string") fail(`${ipath}.${k}`, "expected a string");
+    }
+    return m as Record<string, string>;
+  });
+}
+
+function dnsHostsField(
+  doc: Record<string, unknown>,
+  key: string,
+  path: string,
+): Record<string, string> | undefined {
+  const value = doc[key];
+  if (value === undefined) return undefined;
+  const m = asRecord(value, `${path}.${key}`);
+  for (const [host, ip] of Object.entries(m)) {
+    if (typeof ip !== "string") fail(`${path}.${key}.${host}`, "expected a string");
+  }
+  return m as Record<string, string>;
+}
+
+const HAPP_DNS_TYPES = new Set(["DoH", "DoU"]);
+const HAPP_DOMAIN_STRATEGIES = new Set(["IPIfNonMatch", "AsIs"]);
+
+/**
+ * Documented Happ profile field names (refs/happ_su/dev-docs/routing.md —
+ * the same set pinned in test/render-routing.test.ts), minus `Name`: the
+ * profile name is supplied viper-side via `name` and rendered as `Name`.
+ */
+const ROUTING_PROFILE_KEYS = new Set([
+  "GlobalProxy",
+  "RemoteDNSType",
+  "RemoteDNSDomain",
+  "RemoteDNSIP",
+  "DomesticDNSType",
+  "DomesticDNSDomain",
+  "DomesticDNSIP",
+  "Geoipurl",
+  "Geositeurl",
+  "LastUpdated",
+  "DnsHosts",
+  "DirectSites",
+  "DirectIp",
+  "ProxySites",
+  "ProxyIp",
+  "BlockSites",
+  "BlockIp",
+  "DomainStrategy",
+  "FakeDNS",
+]);
+
+/** Parse + validate the optional `routing:` block (presence = ship). */
+function parseRouting(value: unknown, path: string): RoutingConfig {
+  const d = asRecord(value, path);
+  const name = stringField(d, "name", path);
+  for (const key of Object.keys(d)) {
+    if (key !== "name" && !ROUTING_PROFILE_KEYS.has(key)) {
+      fail(`${path}.${key}`, "unknown key (typo? see the knob reference)");
+    }
+  }
+  const profile: RoutingProfile = {};
+  const set = <K extends keyof RoutingProfile>(key: K, value: RoutingProfile[K] | undefined): void => {
+    if (value !== undefined) profile[key] = value;
+  };
+  set("GlobalProxy", optionalBoolField(d, "GlobalProxy", path));
+  set("RemoteDNSType", optionalEnumField(d, "RemoteDNSType", path, HAPP_DNS_TYPES));
+  set("RemoteDNSDomain", passthroughStringField(d, "RemoteDNSDomain", path));
+  set("RemoteDNSIP", passthroughStringField(d, "RemoteDNSIP", path));
+  set("DomesticDNSType", optionalEnumField(d, "DomesticDNSType", path, HAPP_DNS_TYPES));
+  set("DomesticDNSDomain", passthroughStringField(d, "DomesticDNSDomain", path));
+  set("DomesticDNSIP", passthroughStringField(d, "DomesticDNSIP", path));
+  set("Geoipurl", passthroughStringField(d, "Geoipurl", path));
+  set("Geositeurl", passthroughStringField(d, "Geositeurl", path));
+  set("LastUpdated", passthroughStringField(d, "LastUpdated", path));
+  set("DnsHosts", dnsHostsField(d, "DnsHosts", path));
+  set("DirectSites", ruleListField(d, "DirectSites", path));
+  set("DirectIp", ruleListField(d, "DirectIp", path));
+  set("ProxySites", ruleListField(d, "ProxySites", path));
+  set("ProxyIp", ruleListField(d, "ProxyIp", path));
+  set("BlockSites", ruleListField(d, "BlockSites", path));
+  set("BlockIp", ruleListField(d, "BlockIp", path));
+  set("DomainStrategy", optionalEnumField(d, "DomainStrategy", path, HAPP_DOMAIN_STRATEGIES));
+  set("FakeDNS", optionalBoolField(d, "FakeDNS", path));
+  return { name, profile };
+}
+
 function parseClients(value: unknown, path: string): ClientConfig[] {
   if (!Array.isArray(value) || value.length === 0) {
     fail(`${path}.clients`, "expected a non-empty list of clients");
@@ -190,6 +367,7 @@ export function parseServerConfig(name: string, doc: unknown): ServerConfig {
     "harden",
     "bbr",
     "clients",
+    "routing",
   ]);
   for (const key of Object.keys(d)) {
     if (!allowed.has(key)) {
@@ -217,6 +395,7 @@ export function parseServerConfig(name: string, doc: unknown): ServerConfig {
 
   const maxTimediff = intField(d, "maxTimediff", root, 0, Number.MAX_SAFE_INTEGER, 0);
   const sshKey = optionalStringField(d, "sshKey", root);
+  const routing = d.routing !== undefined ? parseRouting(d.routing, `${root}.routing`) : undefined;
 
   return {
     name,
@@ -238,6 +417,7 @@ export function parseServerConfig(name: string, doc: unknown): ServerConfig {
     harden: boolField(d, "harden", root, true),
     bbr: boolField(d, "bbr", root, true),
     clients: parseClients(d.clients ?? [{ name: "default" }], root),
+    ...(routing !== undefined ? { routing } : {}),
   };
 }
 

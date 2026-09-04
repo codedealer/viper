@@ -56,7 +56,8 @@ test("routing line present, last, and decodes to the documented profile", () => 
   const decoded = Buffer.from(sub.base64, "base64").toString("utf8");
   const lines = decoded.split("\n").filter((l) => l !== "");
   const [routing] = lines.slice(-1);
-  assert.ok(routing?.startsWith("happ://routing/onadd/"), "routing line must be present");
+  assert.ok(routing, "routing line must be present");
+  assert.ok(routing.startsWith("happ://routing/onadd/"));
   assert.equal(routing, sub.routingLine);
 
   // the local half of M6's "routing line present + decodes to valid profile"
@@ -83,6 +84,37 @@ test("copy-paste vless lines stay bare (no routing line in `lines`)", () => {
   const sub = renderSub(fixtureConfig, fixtureState);
   assert.ok(sub.lines.every((l) => l.startsWith("vless://")));
   assert.ok(!sub.lines.some((l) => l.startsWith("happ://")));
+});
+
+test("no routing: config → no routing line anywhere (M8 opt-out)", () => {
+  const config = { ...fixtureConfig };
+  delete config.routing;
+  const sub = renderSub(config, fixtureState);
+  assert.equal(sub.routingLine, undefined);
+  // base64 body decodes to vless-only lines
+  const decoded = Buffer.from(sub.base64, "base64").toString("utf8");
+  assert.equal(decoded, sub.lines.join("\n") + "\n");
+  assert.ok(
+    decoded
+      .split("\n")
+      .filter((l) => l !== "")
+      .every((l) => l.startsWith("vless://")),
+  );
+  assert.ok(!decoded.includes("happ://"));
+});
+
+test("routing present → line last in the body, Name shipped in the profile", () => {
+  const sub = renderSub(fixtureConfig, fixtureState);
+  const decoded = Buffer.from(sub.base64, "base64").toString("utf8");
+  const lines = decoded.split("\n").filter((l) => l !== "");
+  const [last] = lines.slice(-1);
+  assert.ok(last, "routing line must be present");
+  assert.ok(last.startsWith("happ://routing/onadd/"));
+  assert.equal(last, sub.routingLine);
+  const profile = JSON.parse(
+    Buffer.from(last.slice("happ://routing/onadd/".length), "base64").toString("utf8"),
+  ) as Record<string, unknown>;
+  assert.equal(profile.Name, "Viper"); // fixture routing name
 });
 
 test("sub path hash changes the URL only, not the vless lines", () => {

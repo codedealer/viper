@@ -84,6 +84,106 @@ test("harden/bbr knobs default true and honor explicit false", () => {
   expectConfigError({ ...validDoc, bbr: 1 }, "main", "expected a boolean");
 });
 
+// ----------------------------------------------------------------- routing
+
+test("routing: absent by default (opt-in by presence)", () => {
+  const cfg = parseServerConfig("main", validDoc);
+  assert.ok(!("routing" in cfg), "routing must be absent, not undefined-by-default");
+});
+
+test("routing: name-only block parses to an empty profile", () => {
+  const cfg = parseServerConfig("main", { ...validDoc, routing: { name: "Viper" } });
+  assert.deepEqual(cfg.routing, { name: "Viper", profile: {} });
+});
+
+test("routing: full override block parses (lists, string maps, enums)", () => {
+  const cfg = parseServerConfig("main", {
+    ...validDoc,
+    routing: {
+      name: "China",
+      GlobalProxy: true,
+      RemoteDNSType: "DoH",
+      DomesticDNSType: "DoU",
+      DomesticDNSDomain: "", // legal per Happ's documented custom profile
+      Geoipurl: "https://example.com/geoip.dat",
+      DnsHosts: { "cloudflare-dns.com": "1.1.1.1" },
+      BlockSites: ["geosite:ads", { "geosite-category:ads-all": "" }],
+      BlockIp: ["geoip:ads"],
+      DirectSites: ["geosite:geolocation-cn"],
+      DirectIp: ["geoip:cn"],
+      ProxySites: [],
+      ProxyIp: [],
+      DomainStrategy: "AsIs",
+      FakeDNS: false,
+    },
+  });
+  assert.deepEqual(cfg.routing, {
+    name: "China",
+    profile: {
+      GlobalProxy: true,
+      RemoteDNSType: "DoH",
+      DomesticDNSType: "DoU",
+      DomesticDNSDomain: "",
+      Geoipurl: "https://example.com/geoip.dat",
+      DnsHosts: { "cloudflare-dns.com": "1.1.1.1" },
+      BlockSites: ["geosite:ads", { "geosite-category:ads-all": "" }],
+      BlockIp: ["geoip:ads"],
+      DirectSites: ["geosite:geolocation-cn"],
+      DirectIp: ["geoip:cn"],
+      ProxySites: [],
+      ProxyIp: [],
+      DomainStrategy: "AsIs",
+      FakeDNS: false,
+    },
+  });
+});
+
+test("routing: validation failures are actionable ConfigErrors", () => {
+  // missing required name
+  expectConfigError({ ...validDoc, routing: {} }, "main", "routing.name");
+  // not a mapping
+  expectConfigError({ ...validDoc, routing: ["x"] }, "main", "expected a mapping");
+  // unknown keys (typo + Happ's `Name` is viper-side `name`)
+  expectConfigError({ ...validDoc, routing: { name: "a", Name: "b" } }, "main", "routing.Name: unknown key");
+  expectConfigError(
+    { ...validDoc, routing: { name: "a", BlockSitez: [] } },
+    "main",
+    "routing.BlockSitez: unknown key",
+  );
+  // bad enums
+  expectConfigError(
+    { ...validDoc, routing: { name: "a", DomainStrategy: "nope" } },
+    "main",
+    "expected one of",
+  );
+  expectConfigError(
+    { ...validDoc, routing: { name: "a", RemoteDNSType: "nope" } },
+    "main",
+    "expected one of",
+  );
+  // booleans must be real yml booleans (Happ's string form is render-time only)
+  expectConfigError(
+    { ...validDoc, routing: { name: "a", GlobalProxy: "true" } },
+    "main",
+    "expected a boolean",
+  );
+  expectConfigError({ ...validDoc, routing: { name: "a", FakeDNS: 1 } }, "main", "expected a boolean");
+  // rule lists: strings or string maps only
+  expectConfigError({ ...validDoc, routing: { name: "a", BlockSites: [42] } }, "main", "expected a mapping");
+  expectConfigError(
+    { ...validDoc, routing: { name: "a", DirectIp: "geoip:cn" } },
+    "main",
+    "expected a list of rules",
+  );
+  expectConfigError({ ...validDoc, routing: { name: "a", DnsHosts: { h: 1 } } }, "main", "expected a string");
+  // documented enum values are accepted
+  const ok = parseServerConfig("main", {
+    ...validDoc,
+    routing: { name: "a", RemoteDNSType: "DoU", DomesticDNSType: "DoU", DomainStrategy: "AsIs" },
+  });
+  assert.equal(ok.routing?.profile.RemoteDNSType, "DoU");
+});
+
 function expectConfigError(doc: unknown, name: string, fragment: string): void {
   assert.throws(
     () => parseServerConfig(name, doc),
