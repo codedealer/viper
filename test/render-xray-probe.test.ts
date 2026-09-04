@@ -1,7 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PROBE_DIR, PROBE_SOCKS_PORT, renderXrayProbeClient } from "../src/render/xray-probe.js";
-import { fixtureConfig, fixtureState, knobConfig, knobState } from "./fixtures.js";
+import {
+  PROBE_DIR,
+  PROBE_SOCKS_PORT,
+  publicProbeAddress,
+  renderXrayProbeClient,
+} from "../src/render/xray-probe.js";
+import {
+  fixtureConfig,
+  fixtureState,
+  knobConfig,
+  knobState,
+  multiClientConfig,
+  multiClientState,
+} from "./fixtures.js";
 import { assertGolden } from "./golden.js";
 
 test("default knobs — golden probe client config", () => {
@@ -60,6 +72,45 @@ test("missing client uuid fails loudly", () => {
     () => renderXrayProbeClient({ ...fixtureConfig, clients: [{ name: "ghost", limitIp: 0 }] }, fixtureState),
     /no uuid for client/,
   );
+});
+
+test("M9: public variant — outbound dials the domain, loopback stays byte-identical", () => {
+  const publicCfg = renderXrayProbeClient(fixtureConfig, fixtureState, undefined, {
+    address: publicProbeAddress(fixtureConfig),
+  });
+  assertGolden(import.meta.url, "xray-probe-public.json", publicCfg);
+
+  const cfg = JSON.parse(publicCfg) as Record<string, unknown>;
+  const outbound = (cfg.outbounds as Array<Record<string, unknown>>)[0] as Record<string, unknown>;
+  const settings = outbound.settings as Record<string, unknown>;
+  assert.equal(settings.address, fixtureConfig.domain);
+  assert.equal(settings.port, fixtureConfig.port);
+  assert.equal(settings.id, fixtureState.clients[0]?.uuid);
+  // SOCKS inbound is still loopback-only; only the outbound target moved.
+  const inbound = (cfg.inbounds as Array<Record<string, unknown>>)[0] as Record<string, unknown>;
+  assert.equal(inbound.listen, "127.0.0.1");
+  assert.equal(inbound.port, PROBE_SOCKS_PORT);
+
+  // publicProbeAddress is just the domain (the plan's trivial helper).
+  assert.equal(publicProbeAddress(fixtureConfig), fixtureConfig.domain);
+
+  // Loopback default: explicit "127.0.0.1" and omitted are byte-identical
+  // to the pre-M9 rendering (the existing golden asserts this).
+  assert.equal(
+    renderXrayProbeClient(fixtureConfig, fixtureState, undefined, { address: "127.0.0.1" }),
+    renderXrayProbeClient(fixtureConfig, fixtureState),
+  );
+});
+
+test("M9: public variant per client — every client's uuid with the domain address", () => {
+  const phone = renderXrayProbeClient(multiClientConfig, multiClientState, "phone", {
+    address: publicProbeAddress(multiClientConfig),
+  });
+  const cfg = JSON.parse(phone) as Record<string, unknown>;
+  const outbound = (cfg.outbounds as Array<Record<string, unknown>>)[0] as Record<string, unknown>;
+  const settings = outbound.settings as Record<string, unknown>;
+  assert.equal(settings.address, multiClientConfig.domain);
+  assert.equal(settings.id, multiClientState.clients[1]?.uuid);
 });
 
 test("probe sandbox constants", () => {

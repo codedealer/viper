@@ -38,10 +38,28 @@ test("parseArgs: unknown flag, missing value, unexpected argument", () => {
   assert.throws(() => parseArgs(["deploy", "extra"]), /unexpected argument "extra"/);
 });
 
+test("parseArgs: --skip-public-verify (M9, deploy/update opt-out)", () => {
+  const r = parseArgs(["deploy", "--skip-public-verify"]);
+  assert.equal(r.command, "deploy");
+  assert.equal(r.flags.skipPublicVerify, true);
+
+  const r2 = parseArgs(["update", "--name", "main", "--skip-public-verify", "--ip", "1.2.3.4"]);
+  assert.equal(r2.command, "update");
+  assert.equal(r2.flags.skipPublicVerify, true);
+  assert.equal(r2.flags.ip, "1.2.3.4");
+
+  // absent by default
+  assert.equal(parseArgs(["deploy"]).flags.skipPublicVerify, undefined);
+
+  // unknown-flag rejection still works around it
+  assert.throws(() => parseArgs(["deploy", "--skip-public-verif"]), /unknown flag/);
+});
+
 test("usage: lists all seven commands", () => {
   for (const cmd of ["render", "sub", "deploy", "update", "status", "rotate", "teardown"]) {
     assert.ok(usage().includes(cmd), `usage missing ${cmd}`);
   }
+  assert.ok(usage().includes("--skip-public-verify"), "usage missing --skip-public-verify");
 });
 
 // ------------------------------------------------------------ openServer

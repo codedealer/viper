@@ -1,0 +1,40 @@
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "inbounds": [
+    {
+      "listen": "127.0.0.1",
+      "port": 10809,
+      "protocol": "socks",
+      "tag": "probe-socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": false
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "vless",
+      "tag": "probe-direct",
+      "settings": {
+        "address": "vpn.example.com",
+        "port": 443,
+        "id": "123e4567-e89b-42d3-a456-426614174000",
+        "encryption": "none",
+        "flow": "xtls-rprx-vision"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "vpn.example.com",
+          "fingerprint": "chrome",
+          "shortId": "0123456789abcdef",
+          "password": "RRaBqa-l0ks8eBBQsFhxYUL6jPKwKXBtvVlflQqyaD0"
+        }
+      }
+    }
+  ]
+}

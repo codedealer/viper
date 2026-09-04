@@ -44,6 +44,8 @@ export interface CliFlags {
   name?: string;
   ip?: string;
   help?: boolean;
+  /** Skip the M9 local public-path probe (deploy/update only). */
+  skipPublicVerify?: boolean;
 }
 
 export function usage(): string {
@@ -67,6 +69,10 @@ export function usage(): string {
     "  --ip <ip>        per-run IPv4 override for the SSH target + DNS check",
     "                   (no file writes; a notice is printed when it differs",
     "                   from the config value)",
+    "  --skip-public-verify",
+    "                   skip the local public-path probe (deploy/update only)",
+    "                   — use when deploying from a network different than",
+    "                   the end user's (path health stays unverified)",
     "  -h, --help       show this help",
   ].join("\n");
 }
@@ -90,6 +96,8 @@ export function parseArgs(argv: string[]): { command: string | undefined; flags:
       flags.ip = value;
     } else if (arg.startsWith("--ip=")) {
       flags.ip = arg.slice("--ip=".length);
+    } else if (arg === "--skip-public-verify") {
+      flags.skipPublicVerify = true;
     } else if (arg.startsWith("-")) {
       throw new ConfigError(`cli: unknown flag "${arg}" (see --help)`);
     } else if (command === undefined) {
@@ -199,10 +207,16 @@ async function buildAndStage(
   return { name: config.name, ip, config, state, artifacts };
 }
 
-function pipelineOpts(projectDir: string, name: string, heroBase64: string): PipelineStepOptions {
+function pipelineOpts(
+  projectDir: string,
+  name: string,
+  heroBase64: string,
+  extra: PipelineStepOptions = {},
+): PipelineStepOptions {
   return {
     persistState: (state: State) => saveState(statePath(projectDir, name), state),
     heroBase64,
+    ...extra,
   };
 }
 
@@ -285,7 +299,9 @@ async function runDeploy(projectDir: string, flags: CliFlags): Promise<void> {
   const { name, config, ip } = await openServer(projectDir, flags);
   const { state } = await ensureState(projectDir, config);
   const ctx = await buildAndStage(projectDir, config, state, ip);
-  const opts = pipelineOpts(projectDir, name, await loadHeroBase64(projectDir));
+  const opts = pipelineOpts(projectDir, name, await loadHeroBase64(projectDir), {
+    ...(flags.skipPublicVerify === true ? { skipPublicVerify: true } : {}),
+  });
   await runPipeline(ctx, deploySteps(ctx, config, opts), `${name} deploy`);
 }
 
@@ -294,7 +310,9 @@ async function runUpdate(projectDir: string, flags: CliFlags): Promise<void> {
   const { name, config, ip } = await openServer(projectDir, flags);
   const { state } = await ensureState(projectDir, config);
   const ctx = await buildAndStage(projectDir, config, state, ip);
-  const opts = pipelineOpts(projectDir, name, await loadHeroBase64(projectDir));
+  const opts = pipelineOpts(projectDir, name, await loadHeroBase64(projectDir), {
+    ...(flags.skipPublicVerify === true ? { skipPublicVerify: true } : {}),
+  });
   await runPipeline(ctx, updateSteps(ctx, config, opts), `${name} update`);
 }
 

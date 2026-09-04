@@ -6,6 +6,12 @@ export const PROBE_DIR = "/tmp/viper-probe";
 /** Loopback SOCKS port of the probe client (no collision with 10085 API). */
 export const PROBE_SOCKS_PORT = 10809;
 
+/** The M9 public probe dials the domain, not the IP — exactly what a real
+ *  client does (exercises local DNS resolution of the public path). */
+export function publicProbeAddress(config: ServerConfig): string {
+  return config.domain;
+}
+
 /**
  * Render the client side of the REALITY handshake probe (pure function).
  *
@@ -23,8 +29,18 @@ export const PROBE_SOCKS_PORT = 10809;
  *    (renamed from `publicKey` in older versions)
  *  - vless outbound uses the flat settings form
  *    (address/port/id/encryption/flow) shown in the pinned docs
+ *
+ * `opts.address` overrides the outbound target (default `127.0.0.1` —
+ * the M5 loopback probe). The M9 public step passes `config.domain`
+ * (via `publicProbeAddress`) so the probe dials the public path exactly
+ * like a real client. Loopback rendering stays byte-identical.
  */
-export function renderXrayProbeClient(config: ServerConfig, state: State, clientName?: string): string {
+export function renderXrayProbeClient(
+  config: ServerConfig,
+  state: State,
+  clientName?: string,
+  opts: { address?: string } = {},
+): string {
   const name = clientName ?? config.clients[0]?.name;
   if (name === undefined) {
     throw new Error("render/xray-probe: config has no clients");
@@ -37,7 +53,7 @@ export function renderXrayProbeClient(config: ServerConfig, state: State, client
   }
 
   const userSettings: Record<string, string | number> = {
-    address: "127.0.0.1",
+    address: opts.address ?? "127.0.0.1",
     port: config.port,
     id: uuid,
     encryption: "none",

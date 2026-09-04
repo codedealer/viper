@@ -40,6 +40,9 @@ const XRAY_DEPLOY_VERIFY = [
   "Verify REALITY handshake (probe)",
 ];
 
+/** M9: the public-path probe is the LAST step of both deploy and update. */
+const PUBLIC_VERIFY = "Verify public reachability (local probe)";
+
 test("deploySteps: full pipeline order (contract D1)", () => {
   const got = names(deploySteps(ctx, fixtureConfig, {}));
   const expected = [
@@ -54,6 +57,7 @@ test("deploySteps: full pipeline order (contract D1)", () => {
     "Install pinned Xray",
     ...XRAY_DEPLOY_VERIFY,
     ...NGINX_STEPS,
+    PUBLIC_VERIFY,
   ];
   assert.deepEqual(got, expected);
 });
@@ -78,9 +82,9 @@ test("deploySteps: harden:false drops the hardening steps, bbr:false drops bbr",
   assert.ok(noBbr.includes("Configure firewall"));
 });
 
-test("updateSteps: xray deploy + verify + nginx only (contract D3)", () => {
+test("updateSteps: xray deploy + verify + nginx + public verify (contract D3)", () => {
   const got = names(updateSteps(ctx, fixtureConfig, {}));
-  const expected = [...XRAY_DEPLOY_VERIFY, ...NGINX_STEPS];
+  const expected = [...XRAY_DEPLOY_VERIFY, ...NGINX_STEPS, PUBLIC_VERIFY];
   assert.deepEqual(got, expected);
   for (const absent of [
     "Preflight",
@@ -90,6 +94,17 @@ test("updateSteps: xray deploy + verify + nginx only (contract D3)", () => {
   ]) {
     assert.ok(!got.includes(absent), `update must not run ${absent}`);
   }
+});
+
+test("deploySteps/updateSteps: skipPublicVerify keeps the wiring (step reports skipped, M9)", () => {
+  const deploy = names(deploySteps(ctx, fixtureConfig, { skipPublicVerify: true }));
+  const update = names(updateSteps(ctx, fixtureConfig, { skipPublicVerify: true }));
+  // The step stays in both pipelines (last) — the skip is a STATUS, not
+  // an un-wire, so the runner renders `– name (skipped: …)` (decision 8).
+  assert.equal(deploy[deploy.length - 1], PUBLIC_VERIFY);
+  assert.equal(update[update.length - 1], PUBLIC_VERIFY);
+  assert.deepEqual(deploy, names(deploySteps(ctx, fixtureConfig, {})));
+  assert.deepEqual(update, names(updateSteps(ctx, fixtureConfig, {})));
 });
 
 test("teardownSteps: xray teardown then nginx teardown (contract D6)", () => {
@@ -128,6 +143,9 @@ test("deploySteps: full pipeline run twice — run 2 idempotent (R11.3)", async 
     deploySteps(c, fixtureConfig, {
       heroBase64: "aGVsbG8=",
       dnsResolver: async () => [fixtureConfig.ip],
+      // The public probe dials the network — skipped in the unit test
+      // (its behavior is covered by test/steps-public-verify.test.ts).
+      skipPublicVerify: true,
     }),
     remote,
     c,
@@ -143,6 +161,7 @@ test("deploySteps: full pipeline run twice — run 2 idempotent (R11.3)", async 
     deploySteps(c, fixtureConfig, {
       heroBase64: "aGVsbG8=",
       dnsResolver: async () => [fixtureConfig.ip],
+      skipPublicVerify: true,
     }),
     remote,
     c,
