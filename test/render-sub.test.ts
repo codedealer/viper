@@ -146,3 +146,11 @@ test("client names are percent-encoded in the fragment", () => {
   });
   assert.ok(line.endsWith(`#${encodeURIComponent("my phone (2)")}`));
 });
+
+test("non-default port (2053) — explicit port in vless line and subscription URL", () => {
+  const sub = renderSub({ ...fixtureConfig, port: 2053 }, fixtureState);
+  assert.equal(sub.url, "https://vpn.example.com:2053/deadbeefcafebabe1234567890abcdef/sub.txt");
+  const [line] = sub.lines;
+  assert.ok(line);
+  assert.ok(line.startsWith("vless://123e4567-e89b-42d3-a456-426614174000@vpn.example.com:2053?"));
+});

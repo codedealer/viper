@@ -36,7 +36,7 @@ const NGINX_STEPS = [
 const XRAY_DEPLOY_VERIFY = [
   "Deploy Xray configuration",
   "Verify Xray unit active",
-  "Verify Xray listening on :443",
+  "Verify Xray listening on VPN port",
   "Verify REALITY handshake (probe)",
 ];
 

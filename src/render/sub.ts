@@ -1,4 +1,5 @@
 import type { ServerConfig } from "../config.js";
+import { publicHost } from "../config.js";
 import { shortIdOf, type State, type StateClient } from "../state.js";
 import { renderRoutingLine } from "./routing.js";
 
@@ -12,7 +13,7 @@ export interface Subscription {
   routingLine?: string;
   /** vless lines (+ routing line when shipped), base6-encoded — the `sub.txt` body. */
   base64: string;
-  /** Public subscription URL: https://<domain>/<hash>/sub.txt */
+  /** Public subscription URL: https://<domain>[:port]/<hash>/sub.txt (explicit port iff not 443). */
   url: string;
 }
 
@@ -61,6 +62,6 @@ export function renderSub(config: ServerConfig, state: State): Subscription {
     lines,
     ...(routingLine !== undefined ? { routingLine } : {}),
     base64: Buffer.from(body, "utf8").toString("base64"),
-    url: `https://${config.domain}/${state.subHash}/sub.txt`,
+    url: `https://${publicHost(config)}/${state.subHash}/sub.txt`,
   };
 }

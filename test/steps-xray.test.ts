@@ -10,7 +10,7 @@ test("xraySteps — ordered install → deploy → verify triple (no ctx/config 
       "Install pinned Xray",
       "Deploy Xray configuration",
       "Verify Xray unit active",
-      "Verify Xray listening on :443",
+      "Verify Xray listening on VPN port",
       "Verify REALITY handshake (probe)",
     ],
   );

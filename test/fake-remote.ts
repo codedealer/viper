@@ -878,14 +878,14 @@ export class FakeRemote implements SshConn {
       return f !== undefined ? ok(`${createHash("md5").update(f).digest("hex")}  ${p}\n`) : fail(1, "");
     }
 
-    // --- public web path (M6 verifies, D8: curl --resolve <domain>:443:<ip>) ---
+    // --- public web path (M6 verifies, D8: curl --resolve <domain>:<port>:<ip>) ---
     const curl = cmd.match(
-      /^curl -s --resolve ([^:]+):443:([^ ]+) --max-time 30( -o \/dev\/null -w '%{http_code}')? https:\/\/[^ ]+$/,
+      /^curl -s --resolve ([^:]+):([0-9]+):([^ ]+) --max-time 30( -o \/dev\/null -w '%{http_code}')? https:\/\/[^ ]+$/,
     );
     if (curl !== null) {
       const url = cmd.slice(cmd.lastIndexOf("https://"));
       const path = url.replace(/^https:\/\/[^/]+/, "") || "/";
-      const codeOnly = curl[3] !== undefined;
+      const codeOnly = curl[4] !== undefined; // groups: 1=domain 2=port 3=ip 4=code-only flag
       if (this.opts.publicWebDown) {
         return codeOnly ? ok("000") : fail(6, "curl: (6) Could not resolve host");
       }

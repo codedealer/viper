@@ -44,7 +44,7 @@ function isListening(stdout: string, port: number): boolean {
 
 export function xrayListeningStep(): Step {
   return {
-    name: "Verify Xray listening on :443",
+    name: "Verify Xray listening on VPN port",
     run: async (conn, ctx): Promise<StepResult> => {
       const res = await conn.run("ss -tln", { timeoutMs: 10_000 });
       if (res.code !== 0) {

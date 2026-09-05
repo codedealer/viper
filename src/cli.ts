@@ -9,6 +9,7 @@
  *   status     live TUI (ink) over SSH; plain snapshot when not a TTY
  *   rotate     full credential rotation (old subscription dies) + redeploy
  *   teardown   remove viper's xray + nginx artifacts
+ *   check      pre-deploy path probe of a candidate IP (local, no SSH)
  *
  * All SSH commands take `--name <server>` and `--ip <ip>` (a per-run
  * override of the config ip — no file writes; the config + state remain
@@ -32,6 +33,7 @@ import { runSteps, type Step, type StepCtx } from "./steps/runner.js";
 import { deploySteps, updateSteps, teardownSteps, type PipelineStepOptions } from "./pipeline.js";
 import { collectStatus, renderStatusSnapshot, type StatusData } from "./status.js";
 import { StatusTui } from "./status-tui.js";
+import { checkIp, DEFAULT_CHECK_PORTS, formatCheck } from "./check.js";
 import { renderNginx } from "./render/nginx.js";
 import { renderPage } from "./render/page.js";
 import { renderSub } from "./render/sub.js";
@@ -46,6 +48,10 @@ export interface CliFlags {
   help?: boolean;
   /** Skip the M9 local public-path probe (deploy/update only). */
   skipPublicVerify?: boolean;
+  /** check: comma-separated port list (default 22,80,443,2053,8443). */
+  ports?: string;
+  /** check: payload iterations per open port. */
+  iters?: string;
 }
 
 export function usage(): string {
@@ -63,6 +69,9 @@ export function usage(): string {
     "  status     live status TUI over SSH (plain snapshot when not a TTY)",
     "  rotate     rotate all credentials + redeploy (OLD SUBSCRIPTION DIES)",
     "  teardown   remove viper's xray + nginx artifacts from the server",
+    "  check      pre-deploy probe of a candidate IP from THIS network",
+    "                   (TCP classification + TLS/HTTP payload layer; local,",
+    "                   no SSH) — run it before paying a host",
     "",
     "Flags:",
     "  --name <server>  target server (default: the sole server, when exactly one)",
@@ -73,6 +82,8 @@ export function usage(): string {
     "                   skip the local public-path probe (deploy/update only)",
     "                   — use when deploying from a network different than",
     "                   the end user's (path health stays unverified)",
+    "  --ports <a,b,c>  check: ports to probe (default 22,80,443,2053,8443)",
+    "  --iters <n>      check: payload iterations per open port (default 10)",
     "  -h, --help       show this help",
   ].join("\n");
 }
@@ -98,6 +109,18 @@ export function parseArgs(argv: string[]): { command: string | undefined; flags:
       flags.ip = arg.slice("--ip=".length);
     } else if (arg === "--skip-public-verify") {
       flags.skipPublicVerify = true;
+    } else if (arg === "--ports") {
+      const value = argv[++i];
+      if (value === undefined) throw new ConfigError("cli: --ports requires a value");
+      flags.ports = value;
+    } else if (arg.startsWith("--ports=")) {
+      flags.ports = arg.slice("--ports=".length);
+    } else if (arg === "--iters") {
+      const value = argv[++i];
+      if (value === undefined) throw new ConfigError("cli: --iters requires a value");
+      flags.iters = value;
+    } else if (arg.startsWith("--iters=")) {
+      flags.iters = arg.slice("--iters=".length);
     } else if (arg.startsWith("-")) {
       throw new ConfigError(`cli: unknown flag "${arg}" (see --help)`);
     } else if (command === undefined) {
@@ -377,6 +400,38 @@ async function runTeardown(projectDir: string, flags: CliFlags): Promise<void> {
   console.log(`state/${name}.yml kept (re-deploy stays possible); hardening NOT undone.`);
 }
 
+// ----------------------------------------------------------------- check
+
+/**
+ * `check`: pre-deploy probe of a candidate IP from the current network.
+ * Local only — no server, no state, no config. Run it BEFORE paying a
+ * host; a green verdict here is what `deploy`'s public verify assumes.
+ */
+async function runCheck(_projectDir: string, flags: CliFlags): Promise<void> {
+  const ip = flags.ip;
+  if (ip === undefined) {
+    throw new ConfigError("cli: check requires --ip <candidate-ip>");
+  }
+  assertValidIpv4(ip, "--ip");
+  const ports =
+    flags.ports === undefined
+      ? DEFAULT_CHECK_PORTS
+      : flags.ports
+          .split(",")
+          .map((s) => Number(s.trim()))
+          .filter((n) => Number.isInteger(n) && n >= 1 && n <= 65535);
+  if (ports.length === 0) {
+    throw new ConfigError("cli: --ports has no valid port numbers");
+  }
+  const itersRaw = flags.iters === undefined ? 10 : Number(flags.iters);
+  if (!Number.isInteger(itersRaw) || itersRaw < 1 || itersRaw > 100) {
+    throw new ConfigError("cli: --iters must be an integer 1..100");
+  }
+  const result = await checkIp({ ip, ports, iters: itersRaw, timeoutMs: 5_000 });
+  console.log(formatCheck(result));
+  process.exitCode = result.verdict === "clean" ? 0 : 2;
+}
+
 // ----------------------------------------------------------------- status
 
 /**
@@ -420,6 +475,7 @@ export const COMMANDS: Record<string, (projectDir: string, flags: CliFlags) => P
   status: runStatus,
   rotate: runRotate,
   teardown: runTeardown,
+  check: runCheck,
 };
 
 async function main(): Promise<void> {

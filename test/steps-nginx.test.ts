@@ -361,6 +361,16 @@ test("verify-404: unknown path 404s", async () => {
   assert.equal(res.status, "ok");
 });
 
+test("verify page: non-default port (2053) — public path via :2053", async () => {
+  const remote = new FakeRemote();
+  const c: StepCtx = { ...ctx(), config: { ...fixtureConfig, port: 2053 } };
+  await deploy(remote, c);
+  const res = await verifyPageStep().run(remote, c);
+  assert.equal(res.status, "ok");
+  const sub = await verifySubStep().run(remote, c);
+  assert.equal(sub.status, "ok");
+});
+
 test("verify-cert: Let's Encrypt issuer via public :443", async () => {
   const remote = new FakeRemote();
   await deploy(remote);

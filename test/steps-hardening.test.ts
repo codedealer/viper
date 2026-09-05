@@ -406,6 +406,16 @@ test("ufw: fresh box → allows BEFORE enable, no `ufw limit`, custom ports only
   assert.equal(remote.uploads.length, 0);
 });
 
+test("ufw: non-default VPN port (2053) → config.port allowed, 443 NOT", async () => {
+  const remote = new FakeRemote();
+  const c = ctx({ config: { ...fixtureConfig, port: 2053 } });
+  const res = await ufwStep().run(remote, c);
+  assert.equal(res.status, "changed");
+  assert.ok(remote.commands.includes("ufw allow 2053/tcp"));
+  assert.ok(remote.commands.includes("ufw allow 80/tcp"));
+  assert.ok(!remote.commands.includes("ufw allow 443/tcp"));
+});
+
 test("ufw: custom sshd port 2222 → 2222 allowed, 22 NOT", async () => {
   const remote = new FakeRemote({ sshdPorts: [2222] });
   const c = ctx({ config: { ...fixtureConfig, sshPort: 2222 } });

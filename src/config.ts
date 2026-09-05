@@ -99,6 +99,14 @@ const IP_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
  * Validate an IPv4 address, throwing a ConfigError on failure. Shared by
  * the `ip` config field and the CLI `--ip` override (M7, D2).
  */
+/**
+ * Public host for URLs reaching the Xray front door: bare domain on the
+ * default port, explicit `domain:port` otherwise (e.g. a listed IP where
+ * only 2053 is reachable). Used for the subscription URL and verify curls.
+ */
+export const publicHost = (config: ServerConfig): string =>
+  config.port === 443 ? config.domain : `${config.domain}:${config.port}`;
+
 export function assertValidIpv4(ip: string, path: string): void {
   const m = ip.match(IP_RE);
   if (!m || m.slice(1, 5).some((o) => Number(o) > 255)) {

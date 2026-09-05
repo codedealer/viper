@@ -32,6 +32,7 @@
 import { createHash } from "node:crypto";
 import type { SshConn } from "../ssh.js";
 import type { ServerConfig } from "../config.js";
+import { publicHost } from "../config.js";
 import type { Step, StepCtx, StepResult } from "./runner.js";
 import { errDetail, uploadRendered, type HardeningStepOptions } from "./common.js";
 import { renderNginx } from "../render/nginx.js";
@@ -68,11 +69,12 @@ const acmeInstallCertCmd = (domain: string) =>
   `--fullchain-file ${FULLCHAIN(domain)} ` +
   `--reloadcmd "systemctl reload nginx" 2>&1`;
 
-/** Public-path curl (D8): resolve <domain> to <ip> on :443 and hit Xray's
- *  front door — a 200 here proves Reality-fail → loopback web vhost. */
+/** Public-path curl (D8): resolve <domain> to <ip> on the Xray port and hit
+ *  Xray's front door — a 200 here proves Reality-fail → loopback web vhost. */
 function publicCurl(ctx: StepCtx, path: string, codeOnly: boolean): string {
-  const base = `curl -s --resolve ${ctx.config.domain}:443:${ctx.ip} --max-time 30`;
-  const url = `https://${ctx.config.domain}${path}`;
+  const host = publicHost(ctx.config);
+  const base = `curl -s --resolve ${ctx.config.domain}:${ctx.config.port}:${ctx.ip} --max-time 30`;
+  const url = `https://${host}${path}`;
   return codeOnly ? `${base} -o /dev/null -w '%{http_code}' ${url}` : `${base} ${url}`;
 }
 

@@ -10,7 +10,7 @@
  *  - Artifacts travel by SFTP (`uploadRendered`), never heredoc.
  *  - SSH: sshd -t + sshd -T effective-config verification BEFORE any
  *    restart.
- *  - ufw: allow-rules (detected sshd ports + 443 + 80) BEFORE enable;
+ *  - ufw: allow-rules (detected sshd ports + config.port + 80) BEFORE enable;
  *    no `ufw limit 22`; viper owns only its own rules.
  *  - BBR: warn-not-fail (skipped + WARNING) on kernels without the
  *    tunables.
@@ -355,7 +355,7 @@ export function bbrStep(): Step {
 export function ufwStep(): Step {
   return {
     name: "Configure firewall",
-    run: async (conn): Promise<StepResult> => {
+    run: async (conn, ctx): Promise<StepResult> => {
       const which = await conn.run("which ufw 2>/dev/null", { timeoutMs: 15_000 });
       if (which.code !== 0) {
         return {
@@ -372,9 +372,9 @@ export function ufwStep(): Step {
           detail: "could not detect sshd listen ports (sshd -T) — refusing to configure ufw (lockout risk)",
         };
       }
-      // viper-owned ports: detected ssh ports + 443 (VPN) + 80 (ACME).
+      // viper-owned ports: detected ssh ports + config.port (VPN) + 80 (ACME).
       const allowPorts: number[] = [];
-      for (const p of [...ports, 443, 80]) {
+      for (const p of [...ports, ctx.config.port, 80]) {
         if (!allowPorts.includes(p)) allowPorts.push(p);
       }
 
