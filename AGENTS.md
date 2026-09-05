@@ -10,6 +10,10 @@ Provide easy way to store and manage configuration generator, that allows to dep
 
 Context-specific source material can be found in `refs/`
 
+## Operating rules
+
+- **Escalate environment blockers.** When a host-level dependency or permission is missing (tools, sudo, system packages), stop and ask — present the options (user installs it, grants access, or explicitly approves a workaround). Never install workarounds into the user's environment unilaterally.
+
 ## UX
 
 1. [User] provision VPS and set up root access with a key
