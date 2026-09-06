@@ -7,7 +7,7 @@
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
-import { formatBytes, type CollectStatusOptions, type StatusData } from "./status.js";
+import { formatBytes, warningLines, type CollectStatusOptions, type StatusData } from "./status.js";
 
 export interface StatusTuiProps {
   /** Collect one snapshot. `opts.runChecks` drives the probe/cert checks. */
@@ -116,6 +116,9 @@ export function StatusTui({ collect, refreshMs = 5000 }: StatusTuiProps) {
 
   const d = data;
   const h = d.handshake;
+  // Shared with the plain snapshot (warningLines) so the two always match;
+  // computed once per render.
+  const warns = warningLines(d.warnings);
 
   return (
     <Box flexDirection="column">
@@ -154,6 +157,39 @@ export function StatusTui({ collect, refreshMs = 5000 }: StatusTuiProps) {
             </Text>
           ))}
         </Panel>
+      </Box>
+      {/* Warnings gets its own full-width row: the error-log detail lines
+          are long, and six panels in one row overflow typical terminal
+          widths. Row order matches the plain snapshot: Server/Host/Clients
+          → Warnings → Checks/Sub. */}
+      <Box>
+        <Panel title="Warnings">
+          {warns.map((w) => (
+            <Text key={w.label}>
+              <Text dimColor>{w.label}</Text>{" "}
+              {w.state === "ok" ? (
+                <Text color="green">{w.text}</Text>
+              ) : w.state === "warn" ? (
+                <Text color="yellow">{w.text}</Text>
+              ) : (
+                <Text dimColor>{w.text}</Text>
+              )}
+            </Text>
+          ))}
+          {warns
+            .filter((w) => w.extra.length > 0)
+            .map((w) =>
+              w.extra.map((e, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: detail lines are static per snapshot (the whole StatusData is replaced on each refresh, never re-ordered in place)
+                <Text key={`${w.label}-${i}`} dimColor>
+                  {"  "}
+                  {e}
+                </Text>
+              )),
+            )}
+        </Panel>
+      </Box>
+      <Box>
         <Panel title="Checks">
           <Text>
             <Text dimColor>handshake</Text>{" "}

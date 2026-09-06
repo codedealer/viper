@@ -55,6 +55,74 @@ export interface CertInfo {
   validTo: string;
 }
 
+/**
+ * Warning signal state:
+ *  - `ok` — the probe ran and the signal is healthy
+ *  - `warn` — the probe ran and the signal needs attention
+ *  - `unknown` — the probe degraded (command failed) or has not been run
+ *    yet (checks-path signals before the first checks run)
+ */
+export type WarningState = "ok" | "warn" | "unknown";
+
+/**
+ * Error-log signal (xray / nginx). "Recent" = the last `ERROR_LOG_TAIL_LINES`
+ * lines of the file, shown together with the total line count. No time-window
+ * parsing of log timestamps: at the default `warning` log level every line in
+ * xray's error.log (and every line in nginx's error.log) is a real problem,
+ * so any non-empty tail is a warning.
+ */
+export interface LogWarning {
+  state: WarningState;
+  /** Total line count of the log, null when unknown. */
+  total: number | null;
+  /** Last ≤5 lines; empty when ok/unknown. */
+  recent: string[];
+}
+
+/** `systemctl --failed --no-legend` — any service death. */
+export interface FailedUnitsWarning {
+  state: WarningState;
+  /** Trimmed `--no-legend` lines; empty when ok/unknown. */
+  units: string[];
+}
+
+/** fail2ban sshd jail (checks path; carried over from `prev` on refresh). */
+export interface Fail2banWarning {
+  state: WarningState;
+  /** Banned IP count for the jail ("Ban total"), null when unknown. */
+  banned: number | null;
+  /** Total failed attempts ("Total failed"), null when unknown/absent. */
+  totalFailed: number | null;
+}
+
+/**
+ * Cert expiry countdown, derived from `cert.validTo` (checks path — the
+ * cert probe already lives there, and the carry-over makes `cert` available
+ * on refreshes too). Warns below `CERT_WARN_DAYS` (acme.sh auto-renews; this
+ * is visibility, not a repair hook).
+ */
+export interface CertWarning {
+  state: WarningState;
+  /** Whole days until expiry (0 when already past), null when unknown. */
+  daysLeft: number | null;
+}
+
+/** Root filesystem pressure, derived from the `df -m /` already collected. */
+export interface DiskWarning {
+  state: WarningState;
+  /** Use% of /, null when unknown. Warns at ≥ `DISK_WARN_PERCENT`. */
+  percent: number | null;
+}
+
+export interface Warnings {
+  xrayLog: LogWarning;
+  nginxLog: LogWarning;
+  failedUnits: FailedUnitsWarning;
+  fail2ban: Fail2banWarning;
+  cert: CertWarning;
+  disk: DiskWarning;
+}
+
 export interface StatusData {
   name: string;
   ip: string;
@@ -74,6 +142,15 @@ export interface StatusData {
   handshake: HandshakeCheck;
   /** Borrowed LE cert (one-time on load is fine). */
   cert: CertInfo | null;
+  /**
+   * Warnings panel: six signals the user would otherwise have to go looking
+   * for (error logs, dead units, fail2ban, cert expiry, disk pressure).
+   * Refresh-path signals (xrayLog/nginxLog/failedUnits/disk) are re-probed
+   * every 5 s; checks-path signals (fail2ban/cert) are carried over from
+   * `prev` like `handshake`/`cert`. Each probe degrades to `unknown`
+   * independently — one failure never rejects the snapshot.
+   */
+  warnings: Warnings;
   subPath: string;
   subMtime: string;
   fetchedAt: number;
@@ -123,6 +200,13 @@ export function renderIpv6Status(sysctlOut: string | undefined, v6AddrOut: strin
   return m !== null ? `enabled (global v6 on ${m[1]})` : "enabled (no global v6 address)";
 }
 
+/** "Recent" for the error-log signals: the last N lines (documented above). */
+export const ERROR_LOG_TAIL_LINES = 5;
+/** Warn when the LE cert expires within this many days (acme.sh renews at ~30). */
+export const CERT_WARN_DAYS = 14;
+/** Warn when the root filesystem is at or above this Use%. */
+export const DISK_WARN_PERCENT = 80;
+
 function fmtBytes(bytes: number): string {
   const units = ["B", "KiB", "MiB", "GiB", "TiB"];
   let value = bytes;
@@ -158,15 +242,156 @@ function parseFreeRam(output: string): string | undefined {
   return `${used} MB / ${total} MB`;
 }
 
-function parseDfRoot(output: string): string | undefined {
+function parseDfRoot(output: string): { text: string; percent: number } | undefined {
   // df -m /: "Filesystem 1M-blocks Used Available Use% Mounted on\n/dev/vda1 40900 5120 ..."
   const lines = output.trim().split("\n");
   const last = lines[lines.length - 1] ?? "";
   const fields = last.split(/\s+/);
   const total = Number(fields[1]);
   const used = Number(fields[2]);
-  if (!Number.isFinite(total) || !Number.isFinite(used)) return undefined;
-  return `${used} MB / ${total} MB`;
+  if (!Number.isFinite(total) || !Number.isFinite(used) || total <= 0) return undefined;
+  return { text: `${used} MB / ${total} MB`, percent: Math.round((used / total) * 100) };
+}
+
+/**
+ * Whole days until an openssl `notAfter` ("Sep 4 12:00:00 2027 GMT").
+ * Node's `Date.parse` handles this format (verified against Node ≥24,
+ * including the two-space day variant `Mar  1 ...`); unparseable input
+ * degrades to null. 0 when already past (still a warning: state `warn`).
+ */
+export function certDaysLeft(validTo: string): number | null {
+  const ms = Date.parse(validTo);
+  if (!Number.isFinite(ms)) return null;
+  return Math.max(0, Math.ceil((ms - Date.now()) / 86_400_000));
+}
+
+/**
+ * Error-log signal from the `wc -l <` and `tail -n 5` probes. Any line in
+ * these logs is a real problem (see `LogWarning`); a missing/unreadable file
+ * degrades to `unknown` (we cannot see the window, so we don't claim it is
+ * clean).
+ */
+function logWarning(
+  countOut: { code: number; stdout: string } | undefined,
+  tailOut: { code: number; stdout: string } | undefined,
+): LogWarning {
+  if (tailOut === undefined || tailOut.code !== 0) {
+    return { state: "unknown", total: null, recent: [] };
+  }
+  const recent = tailOut.stdout.split("\n").filter((l) => l !== "");
+  const total = countOut !== undefined && countOut.code === 0 ? Number(countOut.stdout.trim()) : null;
+  return {
+    state: recent.length > 0 ? "warn" : "ok",
+    total: Number.isFinite(total as number) ? (total as number) : null,
+    recent: recent.slice(-ERROR_LOG_TAIL_LINES),
+  };
+}
+
+/** `systemctl --failed --no-legend` → any service death. */
+function failedUnitsWarning(res: { code: number; stdout: string } | undefined): FailedUnitsWarning {
+  if (res === undefined || res.code !== 0) return { state: "unknown", units: [] };
+  const units = res.stdout
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "");
+  return { state: units.length > 0 ? "warn" : "ok", units };
+}
+
+/**
+ * `fail2ban-client status sshd` → the jail's ban count. The per-jail status
+ * reports the live ban count as "Ban total: N" (the "Currently banned: N"
+ * line only exists in the GLOBAL `fail2ban-client status`); "Total failed"
+ * gives the cumulative attempt count when present. Degrades to `unknown`
+ * when fail2ban is not installed/running (non-zero exit).
+ */
+function fail2banWarning(res: { code: number; stdout: string } | undefined): Fail2banWarning {
+  if (res === undefined || res.code !== 0) return { state: "unknown", banned: null, totalFailed: null };
+  const num = (label: string): number | null => {
+    const m = res.stdout.match(new RegExp(`${label}: (\\d+)`));
+    return m !== null && m[1] !== undefined ? Number(m[1]) : null;
+  };
+  const banned = num("Ban total");
+  if (banned === null) return { state: "unknown", banned: null, totalFailed: num("Total failed") };
+  return { state: banned > 0 ? "warn" : "ok", banned, totalFailed: num("Total failed") };
+}
+
+function certWarning(cert: CertInfo | null): CertWarning {
+  if (cert === null || cert.validTo === "") return { state: "unknown", daysLeft: null };
+  const daysLeft = certDaysLeft(cert.validTo);
+  if (daysLeft === null) return { state: "unknown", daysLeft: null };
+  return { state: daysLeft < CERT_WARN_DAYS ? "warn" : "ok", daysLeft };
+}
+
+function diskWarning(df: { text: string; percent: number } | undefined): DiskWarning {
+  if (df === undefined) return { state: "unknown", percent: null };
+  return { state: df.percent >= DISK_WARN_PERCENT ? "warn" : "ok", percent: df.percent };
+}
+
+export interface WarningLine {
+  /** Panel label (xray, nginx, units, fail2ban, cert, disk). */
+  label: string;
+  state: WarningState;
+  /** Compact one-line detail. */
+  text: string;
+  /** Extra detail lines (error-log tail / unit list) — only when non-ok. */
+  extra: string[];
+}
+
+/**
+ * Shared presentation for the Warnings section — one compact line per
+ * signal so every window is visibly watched; detail only when non-ok.
+ * Used by BOTH the ink TUI and the plain snapshot so the two always match.
+ */
+export function warningLines(w: Warnings): WarningLine[] {
+  const log = (label: string, lw: LogWarning): WarningLine => {
+    if (lw.state === "ok") return { label, state: "ok", text: "ok", extra: [] };
+    if (lw.state === "warn")
+      return {
+        label,
+        state: "warn",
+        text:
+          lw.total !== null
+            ? `${lw.total} error${lw.total === 1 ? "" : "s"} (last ${lw.recent.length})`
+            : `${lw.recent.length} recent errors`,
+        extra: lw.recent,
+      };
+    return { label, state: "unknown", text: "unknown", extra: [] };
+  };
+  const units = w.failedUnits;
+  const unitsLine: WarningLine =
+    units.state === "ok"
+      ? { label: "units", state: "ok", text: "ok", extra: [] }
+      : units.state === "warn"
+        ? { label: "units", state: "warn", text: `${units.units.length} failed`, extra: units.units }
+        : { label: "units", state: "unknown", text: "unknown", extra: [] };
+  const f2b = w.fail2ban;
+  const f2bLine: WarningLine =
+    f2b.state === "ok"
+      ? { label: "fail2ban", state: "ok", text: "0 banned", extra: [] }
+      : f2b.state === "warn"
+        ? {
+            label: "fail2ban",
+            state: "warn",
+            text: `${f2b.banned} banned${f2b.totalFailed !== null ? ` (total failed: ${f2b.totalFailed})` : ""}`,
+            extra: [],
+          }
+        : { label: "fail2ban", state: "unknown", text: "unknown (not run yet)", extra: [] };
+  const c = w.cert;
+  const certLine: WarningLine =
+    c.state === "unknown"
+      ? { label: "cert", state: "unknown", text: "unknown (not run yet)", extra: [] }
+      : {
+          label: "cert",
+          state: c.state,
+          text: `${c.daysLeft} day${c.daysLeft === 1 ? "" : "s"} left`,
+          extra: [],
+        };
+  const d = w.disk;
+  const diskLine: WarningLine =
+    d.state === "unknown"
+      ? { label: "disk", state: "unknown", text: "unknown", extra: [] }
+      : { label: "disk", state: d.state, text: `${d.percent}% used`, extra: [] };
+  return [log("xray", w.xrayLog), log("nginx", w.nginxLog), unitsLine, f2bLine, certLine, diskLine];
 }
 
 interface RawStat {
@@ -187,39 +412,67 @@ export async function collectStatus(
   const runChecks = opts.runChecks === true;
   const subPath = `/${state.subHash}/sub.txt`;
 
-  const [version, unit, unitEnter, hostUptime, top, free, df, stats, subMtime, ipv6Sysctl, ipv6Addr] =
-    await Promise.all([
-      conn.run(`${XRAY_BIN} version`, { timeoutMs: 15_000 }).catch(() => undefined),
-      conn.run("systemctl is-active xray", { timeoutMs: 15_000 }).catch(() => undefined),
-      conn
-        .run("systemctl show xray -p ActiveEnterTimestamp --value", {
-          timeoutMs: 15_000,
-        })
-        .catch(() => undefined),
-      conn.run("uptime -p", { timeoutMs: 15_000 }).catch(() => undefined),
-      conn.run("LC_ALL=C top -bn1", { timeoutMs: 20_000 }).catch(() => undefined),
-      conn.run("free -m", { timeoutMs: 15_000 }).catch(() => undefined),
-      conn.run("df -m /", { timeoutMs: 15_000 }).catch(() => undefined),
-      (async () => {
-        // statsApiFromRendered throws synchronously when the rendered
-        // config has no api.listen — keep it inside the promise so it
-        // degrades to undefined like every other command instead of
-        // rejecting the whole snapshot.
-        const api = statsApiFromRendered(config, state);
-        return conn.run(`${XRAY_BIN} api statsquery --server=${api}`, { timeoutMs: 30_000 });
-      })().catch(() => undefined),
-      conn
-        .run(`stat -c %y /var/www/viper/${config.name}/sub.txt 2>/dev/null`, {
-          timeoutMs: 15_000,
-        })
-        .catch(() => undefined),
-      conn
-        .run("sysctl -n net.ipv6.conf.all.disable_ipv6 net.ipv6.conf.default.disable_ipv6", {
-          timeoutMs: 15_000,
-        })
-        .catch(() => undefined),
-      conn.run("ip -6 addr show scope global", { timeoutMs: 15_000 }).catch(() => undefined),
-    ]);
+  const [
+    version,
+    unit,
+    unitEnter,
+    hostUptime,
+    top,
+    free,
+    df,
+    stats,
+    subMtime,
+    ipv6Sysctl,
+    ipv6Addr,
+    xrayLogCount,
+    xrayLogTail,
+    nginxLogCount,
+    nginxLogTail,
+    failedUnits,
+  ] = await Promise.all([
+    conn.run(`${XRAY_BIN} version`, { timeoutMs: 15_000 }).catch(() => undefined),
+    conn.run("systemctl is-active xray", { timeoutMs: 15_000 }).catch(() => undefined),
+    conn
+      .run("systemctl show xray -p ActiveEnterTimestamp --value", {
+        timeoutMs: 15_000,
+      })
+      .catch(() => undefined),
+    conn.run("uptime -p", { timeoutMs: 15_000 }).catch(() => undefined),
+    conn.run("LC_ALL=C top -bn1", { timeoutMs: 20_000 }).catch(() => undefined),
+    conn.run("free -m", { timeoutMs: 15_000 }).catch(() => undefined),
+    conn.run("df -m /", { timeoutMs: 15_000 }).catch(() => undefined),
+    (async () => {
+      // statsApiFromRendered throws synchronously when the rendered
+      // config has no api.listen — keep it inside the promise so it
+      // degrades to undefined like every other command instead of
+      // rejecting the whole snapshot.
+      const api = statsApiFromRendered(config, state);
+      return conn.run(`${XRAY_BIN} api statsquery --server=${api}`, { timeoutMs: 30_000 });
+    })().catch(() => undefined),
+    conn
+      .run(`stat -c %y /var/www/viper/${config.name}/sub.txt 2>/dev/null`, {
+        timeoutMs: 15_000,
+      })
+      .catch(() => undefined),
+    conn
+      .run("sysctl -n net.ipv6.conf.all.disable_ipv6 net.ipv6.conf.default.disable_ipv6", {
+        timeoutMs: 15_000,
+      })
+      .catch(() => undefined),
+    conn.run("ip -6 addr show scope global", { timeoutMs: 15_000 }).catch(() => undefined),
+    // Warnings (refresh path): two cheap probes per error log + failed
+    // units. Disk pressure is derived from `df` above; fail2ban and the
+    // cert run on the checks path (see below).
+    conn.run(`wc -l < /var/log/xray/error.log 2>/dev/null`, { timeoutMs: 15_000 }).catch(() => undefined),
+    conn
+      .run(`tail -n ${ERROR_LOG_TAIL_LINES} /var/log/xray/error.log 2>/dev/null`, { timeoutMs: 15_000 })
+      .catch(() => undefined),
+    conn.run(`wc -l < /var/log/nginx/error.log 2>/dev/null`, { timeoutMs: 15_000 }).catch(() => undefined),
+    conn
+      .run(`tail -n ${ERROR_LOG_TAIL_LINES} /var/log/nginx/error.log 2>/dev/null`, { timeoutMs: 15_000 })
+      .catch(() => undefined),
+    conn.run("systemctl --failed --no-legend", { timeoutMs: 15_000 }).catch(() => undefined),
+  ]);
 
   let statValues: Map<string, number> = new Map();
   if (stats !== undefined && stats.code === 0) {
@@ -244,6 +497,10 @@ export async function collectStatus(
 
   let handshake: HandshakeCheck = { ok: null, detail: "not run yet" };
   let cert: CertInfo | null = null;
+  // fail2ban is a client call into the fail2ban server (IPC, slower than a
+  // file tail) and changes rarely — checks path, carried from `prev`, the
+  // same way as `handshake`/`cert`.
+  let fail2ban: Fail2banWarning = { state: "unknown", banned: null, totalFailed: null };
   if (runChecks) {
     const ctx: StepCtx = {
       name: config.name,
@@ -278,11 +535,17 @@ export async function collectStatus(
         validTo: get("notAfter="),
       };
     }
+    const f2bRes = await conn
+      .run("fail2ban-client status sshd", { timeoutMs: 15_000 })
+      .catch(() => undefined);
+    fail2ban = fail2banWarning(f2bRes);
   } else if (opts.prev !== undefined) {
     handshake = opts.prev.handshake;
     cert = opts.prev.cert;
+    fail2ban = opts.prev.warnings.fail2ban;
   }
 
+  const diskParsed = df !== undefined ? parseDfRoot(df.stdout) : undefined;
   return {
     name: config.name,
     ip: config.ip,
@@ -295,7 +558,7 @@ export async function collectStatus(
     hostUptime: hostUptime?.stdout.trim() ?? "",
     cpu: (top !== undefined ? parseTopCpu(top.stdout) : undefined) ?? "n/a",
     ram: (free !== undefined ? parseFreeRam(free.stdout) : undefined) ?? "n/a",
-    disk: (df !== undefined ? parseDfRoot(df.stdout) : undefined) ?? "n/a",
+    disk: diskParsed?.text ?? "n/a",
     clients,
     ipv6: renderIpv6Status(
       ipv6Sysctl !== undefined && ipv6Sysctl.code === 0 ? ipv6Sysctl.stdout : undefined,
@@ -303,6 +566,14 @@ export async function collectStatus(
     ),
     handshake,
     cert,
+    warnings: {
+      xrayLog: logWarning(xrayLogCount, xrayLogTail),
+      nginxLog: logWarning(nginxLogCount, nginxLogTail),
+      failedUnits: failedUnitsWarning(failedUnits),
+      fail2ban,
+      cert: certWarning(cert),
+      disk: diskWarning(diskParsed),
+    },
     subPath,
     subMtime: subMtime?.stdout.trim() ?? "n/a",
     fetchedAt: Date.now(),
@@ -347,6 +618,15 @@ export function renderStatusSnapshot(d: StatusData): string {
       (c) => `${c.name} (${c.uuid}): up ${formatBytes(c.uplink)}, down ${formatBytes(c.downlink)}`,
     ),
   );
+
+  // Warnings: one compact line per signal (via the shared warningLines so
+  // the TUI and the snapshot always match); detail lines only when non-ok.
+  const warningRows: string[] = [];
+  for (const w of warningLines(d.warnings)) {
+    warningRows.push(`${(w.label + ":").padEnd(11)}${w.text}`);
+    for (const e of w.extra) warningRows.push(`           ${e}`);
+  }
+  section("Warnings", warningRows);
 
   const h = d.handshake;
   section("Checks", [

@@ -165,12 +165,34 @@ export interface FakeRemoteOptions {
   /** df -m / total/used MB. */
   diskTotalMb?: number;
   diskUsedMb?: number;
+  /** `df -m /` fails (disk probe degrades). */
+  dfFails?: boolean;
   /** Pre-seeded /var/www/viper/main/sub.txt (gives stat -c %y an mtime). */
   subFile?: string;
   /** Present cert subject/issuer/notAfter for the status cert probe. */
   certSubject?: string;
   certIssuer?: string;
   certNotAfter?: string;
+
+  // --- status Warnings ---
+  /** Content of /var/log/xray/error.log (default "" = present, empty). */
+  xrayErrorLog?: string;
+  /** /var/log/xray/error.log is missing (probe degrades to unknown). */
+  xrayErrorLogMissing?: boolean;
+  /** Content of /var/log/nginx/error.log (default "" = present, empty). */
+  nginxErrorLog?: string;
+  /** /var/log/nginx/error.log is missing (probe degrades to unknown). */
+  nginxErrorLogMissing?: boolean;
+  /** `systemctl --failed --no-legend` lines (default: none). */
+  failedUnits?: string[];
+  /** `systemctl --failed` itself fails (probe degrades to unknown). */
+  failedUnitsFails?: boolean;
+  /** fail2ban sshd jail ban count ("Ban total", default 0). */
+  fail2banBanned?: number;
+  /** fail2ban sshd jail "Total failed" (default 0). */
+  fail2banTotalFailed?: number;
+  /** `fail2ban-client status sshd` fails (not installed / not running). */
+  fail2banClientFails?: boolean;
 
   // --- IPv6 (M8) ---
   /** disable_ipv6 sysctls already 1/1 (default false = v6 enabled, like a
@@ -1066,6 +1088,7 @@ export class FakeRemote implements SshConn {
       );
     }
     if (cmd === "df -m /") {
+      if (this.opts.dfFails) return fail(1, "df: /: Input/output error");
       const total = this.opts.diskTotalMb ?? 40900;
       const used = this.opts.diskUsedMb ?? 5120;
       return ok(
@@ -1099,6 +1122,49 @@ export class FakeRemote implements SshConn {
         `subject=${this.opts.certSubject ?? "CN = viper.example"}\n` +
           `issuer=${this.opts.certIssuer ?? "C = US, O = Let's Encrypt, CN = R3"}\n` +
           `notAfter=${this.opts.certNotAfter ?? "Sep 30 00:00:00 2026 GMT"}\n`,
+      );
+    }
+
+    // --- status Warnings (M7) ---
+    const errLog = (name: "xray" | "nginx") => {
+      const path = name === "xray" ? "/var/log/xray/error.log" : "/var/log/nginx/error.log";
+      const missing =
+        (name === "xray" ? this.opts.xrayErrorLogMissing : this.opts.nginxErrorLogMissing) === true;
+      const content = (name === "xray" ? this.opts.xrayErrorLog : this.opts.nginxErrorLog) ?? "";
+      if (cmd === `wc -l < ${path} 2>/dev/null`) {
+        if (missing) return fail(1, `sh: 1: cannot open ${path}: Directory nonexistent`);
+        return ok(`${content === "" ? 0 : content.trimEnd().split("\n").length}\n`);
+      }
+      if (cmd === `tail -n 5 ${path} 2>/dev/null`) {
+        if (missing) return fail(1, `tail: cannot open '${path}' for reading: No such file or directory`);
+        const lines = content === "" ? [] : content.trimEnd().split("\n");
+        return ok(lines.slice(-5).join("\n") + (lines.length > 0 ? "\n" : ""));
+      }
+      return null;
+    };
+    {
+      const r = errLog("xray") ?? errLog("nginx");
+      if (r !== null) return r;
+    }
+    if (cmd === "systemctl --failed --no-legend") {
+      if (this.opts.failedUnitsFails) return fail(1, "System has not been booted with systemd");
+      const lines = this.opts.failedUnits ?? [];
+      return ok(lines.length > 0 ? lines.join("\n") + "\n" : "");
+    }
+    if (cmd === "fail2ban-client status sshd") {
+      if (this.opts.fail2banClientFails || !this.fail2banActive)
+        return fail(1, "Server returned unexpected error\nServer error: No such file");
+      const banned = this.opts.fail2banBanned ?? 0;
+      const totalFailed = this.opts.fail2banTotalFailed ?? 0;
+      return ok(
+        "Status for the jail: sshd\n" +
+          "|- Filter\n" +
+          "|  |- Current failed: 0\n" +
+          `|  |- Total failed: ${totalFailed}\n` +
+          "|  `- Journal matches: _SYSTEMD_UNIT=sshd.service + (__SUBSYSTEM_SYSTEMd+ )\n" +
+          "`- Actions\n" +
+          "   |- Running: 0\n" +
+          `   \`- Ban total: ${banned}\n`,
       );
     }
 

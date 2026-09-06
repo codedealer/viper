@@ -70,8 +70,10 @@ anything touches the server.
    ```
 
 6. **Verify**: `pnpm viper status --name main` — live panel showing Xray
-   version/unit state, host CPU/RAM/disk, per-client traffic, the REALITY
-   handshake check, the borrowed LE cert, and the subscription mtime.
+   version/unit state, host CPU/RAM/disk, per-client traffic, a Warnings
+   panel (xray/nginx error logs, failed units, fail2ban bans, cert expiry,
+   disk pressure), the REALITY handshake check, the borrowed LE cert, and
+   the subscription mtime.
 
 ## Command reference
 
@@ -87,7 +89,7 @@ writes. `-h`/`--help` prints usage.
 | `sub` | no | Ensure state, then print the subscription URL + lines. Local only — no VPS access. |
 | `deploy` | yes | Full fresh-VPS pipeline (see quick start). Idempotent — safe to re-run on a live server. |
 | `update` | yes | No-disruption redeploy: re-render, Xray deploy (validate-before-swap) + verify, nginx steps. No preflight/packages/hardening/Xray install. A healthy cert-issue is skipped (rc 2) → zero Let's Encrypt budget consumption. |
-| `status` | yes | Live TUI (ink) over one persistent SSH connection, refreshing every 5 s. `q`/Ctrl-C quit, `r` re-run the checks (handshake probe + cert). When stdout is not a TTY, prints a single plain-text snapshot and exits. |
+| `status` | yes | Live TUI (ink) over one persistent SSH connection, refreshing every 5 s. `q`/Ctrl-C quit, `r` re-run the checks (handshake probe + cert). The Warnings panel surfaces recent xray/nginx error lines, failed systemd units, the fail2ban sshd ban count, cert days remaining (warns < 14 d), and root-disk use% (warns ≥ 80%). When stdout is not a TTY, prints a single plain-text snapshot and exits. |
 | `rotate` | yes | Full credential rotation: new Reality keypair, new UUID for every client, new sub hash (new sub path). Persists the new state locally first, then runs the `update` pipeline. **The old subscription is invalid afterwards** — re-import the new one (printed with a warning). Requires an existing state file. |
 | `teardown` | yes | Remove viper's Xray (unit, binary, geo assets, config) and nginx artifacts (viper vhosts, acme renewal cron, page + subscription files). Requires an existing state file. See [teardown](#teardown) for what is kept. |
 
