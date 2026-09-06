@@ -210,6 +210,10 @@ state-pinned `shortId` are preserved.
   sshd drop-in (keys only, no root password), fail2ban, BBR and
   unattended-upgrades. There is no un-hardening command; `teardown` leaves
   the hardening in place.
+- **Xray log rotation.** viper installs `/etc/logrotate.d/xray` to rotate
+  `/var/log/xray/*.log` (daily, keep 14, `copytruncate` — Xray holds its log
+  fds open, so rename+create would not rotate until a restart). Re-asserted
+  on every `deploy`/`update`; removed by `teardown`.
 - **Let's Encrypt renewal.** The cert is issued via acme.sh (HTTP-01 on port
   80) and renewed by an acme.sh cron — 90-day certs, renewed well inside
   validity. Renewal needs port 80 reachable from the internet; if the ACME

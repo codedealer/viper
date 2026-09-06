@@ -113,6 +113,8 @@ export interface FakeRemoteOptions {
   probeComesUp?: boolean;
   /** Simulate a leftover orphan probe process from a previously failed run. */
   orphanProbe?: boolean;
+  /** `logrotate -d` on the xray drop-in rejects with this stderr. */
+  logrotateValidateFails?: string;
 
   // --- nginx + acme (M6) ---
   /** cron package installed (default true — a stock VPS has it). */
@@ -791,6 +793,23 @@ export class FakeRemote implements SshConn {
       return this.xrayActive ? ok("active\n") : fail(3, "inactive\n");
     }
 
+    // --- xray log rotation ---
+    if (cmd === "cat /etc/logrotate.d/xray 2>/dev/null") {
+      const f = this.files.get("/etc/logrotate.d/xray");
+      return f !== undefined ? ok(f) : fail(1, "");
+    }
+    if (cmd === "chmod 644 /etc/logrotate.d/xray") return ok();
+    if (cmd === "logrotate -d /etc/logrotate.d/xray") {
+      if (this.opts.logrotateValidateFails !== undefined) {
+        return fail(1, this.opts.logrotateValidateFails);
+      }
+      return ok("rotating pattern: /var/log/xray/*.log\n");
+    }
+    if (cmd === "rm -f /etc/logrotate.d/xray") {
+      this.files.delete("/etc/logrotate.d/xray");
+      return ok();
+    }
+
     // --- xray verify (M5) ---
     if (cmd === "ss -tln") {
       const ports = [...this.listeningPorts];
@@ -842,12 +861,13 @@ export class FakeRemote implements SshConn {
     // --- xray teardown (M5) ---
     if (
       cmd ===
-      "test -f /usr/local/bin/xray || test -f /etc/systemd/system/xray.service || test -f /etc/xray/config.json"
+      "test -f /usr/local/bin/xray || test -f /etc/systemd/system/xray.service || test -f /etc/xray/config.json || test -f /etc/logrotate.d/xray"
     ) {
       const present =
         this.xrayInstalled ||
         this.files.has("/etc/systemd/system/xray.service") ||
-        this.files.has("/etc/xray/config.json");
+        this.files.has("/etc/xray/config.json") ||
+        this.files.has("/etc/logrotate.d/xray");
       return present ? ok() : fail(1, "");
     }
     if (cmd === "systemctl disable --now xray 2>/dev/null") {
@@ -1192,6 +1212,7 @@ export class FakeRemote implements SshConn {
       c.startsWith("rm -rf /etc/xray") ||
       c === "rm -f /usr/local/bin/xray" ||
       c === "rm -f /etc/systemd/system/xray.service" ||
+      c === "rm -f /etc/logrotate.d/xray" ||
       c.startsWith("pkill ") ||
       c.startsWith("kill ") ||
       // nginx + acme (M6)

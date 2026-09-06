@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { xrayTeardownStep } from "../src/steps/xray-teardown.js";
 import { renderXrayUnit } from "../src/steps/xray-install.js";
 import { renderXray } from "../src/render/xray.js";
+import { renderXrayLogrotateDropin, XRAY_LOGROTATE_PATH } from "../src/steps/xray-logrotate.js";
 import { FakeRemote } from "./fake-remote.js";
 import { fixtureConfig, fixtureState } from "./fixtures.js";
 import type { StepCtx } from "../src/steps/runner.js";
@@ -24,6 +25,7 @@ test("teardown: fully installed — unit, binary, geo, config removed", async ()
     xrayUnitFile: renderXrayUnit(),
     xrayConfigFile: renderXray(fixtureConfig, fixtureState),
   });
+  remote.files.set(XRAY_LOGROTATE_PATH, renderXrayLogrotateDropin());
   const res = await xrayTeardownStep().run(remote, ctx());
   assert.equal(res.status, "changed");
 
@@ -38,10 +40,23 @@ test("teardown: fully installed — unit, binary, geo, config removed", async ()
   assert.ok(cmds.includes("rm -f /usr/local/bin/xray"));
   assert.ok(cmds.includes("rm -rf /usr/local/share/xray"));
   assert.ok(cmds.includes("rm -rf /etc/xray"));
+  // viper's logrotate drop-in is a viper artifact — removed on teardown.
+  assert.ok(cmds.includes(`rm -f ${XRAY_LOGROTATE_PATH}`));
+  assert.equal(remote.files.has(XRAY_LOGROTATE_PATH), false, "drop-in removed");
   // nginx is M6's scope — teardown must not touch it.
   assert.ok(!cmds.some((c) => c.includes("nginx")));
-  // Logs left in place for forensics.
+  // The log FILES themselves are left in place for forensics (only the
+  // drop-in that references them is removed).
   assert.ok(!cmds.some((c) => c.includes("/var/log/xray")));
+});
+
+test("teardown: logrotate drop-in only — still removed", async () => {
+  const remote = new FakeRemote();
+  remote.files.set(XRAY_LOGROTATE_PATH, renderXrayLogrotateDropin());
+  const res = await xrayTeardownStep().run(remote, ctx());
+  assert.equal(res.status, "changed");
+  assert.ok(remote.commands.includes(`rm -f ${XRAY_LOGROTATE_PATH}`));
+  assert.equal(remote.files.has(XRAY_LOGROTATE_PATH), false);
 });
 
 test("teardown: nothing present — ok, zero mutating calls", async () => {

@@ -7,7 +7,8 @@
  *  - `deploySteps` — fresh VPS, full pipeline:
  *      preflight → packages → hardening (knob-gated; M8: Configure IPv6
  *      after BBR, before ufw — own `allowIPv6` knob, deploy-only) →
- *      xray install → xray deploy → xray unit/listening verify →
+ *      xray install → xray deploy → xray log rotation →
+ *      xray unit/listening verify →
  *      nginx (13 steps, first = remove stock default site, M8 D3) →
  *      REALITY handshake probe →
  *      public verify (M9 local probe, last — the acceptance test of
@@ -15,8 +16,8 @@
  *    Idempotent by construction (every step is check-then-act except the
  *    two documented always-runners), so re-running `deploy` on a live
  *    server is safe.
- *  - `updateSteps` — no-disruption redeploy: xray deploy + verify (NO
- *    preflight/packages/hardening/xray-install) + nginx steps →
+ *  - `updateSteps` — no-disruption redeploy: xray deploy + log rotation +
+ *    verify (NO preflight/packages/hardening/xray-install) + nginx steps →
  *    REALITY handshake probe → public verify (M9, last — re-detects an
  *    IP that got listed after the original deploy).
  *    cert-issue returns rc-2 skip on a healthy server → zero LE budget.
@@ -35,6 +36,7 @@ import { hardeningSteps } from "./steps/hardening.js";
 import { xrayTeardownSteps } from "./steps/xray.js";
 import { xrayInstallStep } from "./steps/xray-install.js";
 import { xrayDeployStep } from "./steps/xray-deploy.js";
+import { xrayLogrotateStep } from "./steps/xray-logrotate.js";
 import { xrayUnitActiveStep, xrayListeningStep, xrayHandshakeProbeStep } from "./steps/xray-verify.js";
 import { nginxSteps, nginxTeardownSteps, type NginxStepOptions } from "./steps/nginx.js";
 import { publicVerifyStep } from "./steps/public-verify.js";
@@ -58,6 +60,7 @@ export function deploySteps(ctx: StepCtx, config: ServerConfig, opts: PipelineSt
     ...hardeningSteps(ctx, config, opts),
     xrayInstallStep(opts),
     xrayDeployStep(opts.poll),
+    xrayLogrotateStep(),
     xrayUnitActiveStep(),
     xrayListeningStep(),
     ...nginxSteps(ctx, config, opts),
@@ -78,6 +81,7 @@ export function deploySteps(ctx: StepCtx, config: ServerConfig, opts: PipelineSt
 export function updateSteps(ctx: StepCtx, config: ServerConfig, opts: PipelineStepOptions = {}): Step[] {
   return [
     xrayDeployStep(opts.poll),
+    xrayLogrotateStep(),
     xrayUnitActiveStep(),
     xrayListeningStep(),
     ...nginxSteps(ctx, config, opts),

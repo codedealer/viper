@@ -37,6 +37,9 @@ const NGINX_STEPS = [
 
 const XRAY_DEPLOY_VERIFY = [
   "Deploy Xray configuration",
+  // The logrotate drop-in is a config artifact that must exist on live
+  // boxes after `update` too, so it rides in both pipelines here.
+  "Configure xray log rotation",
   "Verify Xray unit active",
   "Verify Xray listening on VPN port",
 ];
@@ -52,7 +55,7 @@ const HANDSHAKE_PROBE = "Verify REALITY handshake (probe)";
 /** M9: the public-path probe is the LAST step of both deploy and update. */
 const PUBLIC_VERIFY = "Verify public reachability (local probe)";
 
-test("deploySteps: full pipeline order (contract D1) — 28 steps (26 pre-M8)", () => {
+test("deploySteps: full pipeline order (contract D1) — 29 steps (26 pre-M8)", () => {
   const got = names(deploySteps(ctx, fixtureConfig, {}));
   const expected = [
     "Preflight",
@@ -72,7 +75,7 @@ test("deploySteps: full pipeline order (contract D1) — 28 steps (26 pre-M8)", 
     PUBLIC_VERIFY,
   ];
   assert.deepEqual(got, expected);
-  assert.equal(got.length, 28, "deploy grew 26 -> 28 steps with M8");
+  assert.equal(got.length, 29, "deploy grew 26 -> 29 steps (M8 + log rotation)");
 });
 
 test("deploySteps: harden:false drops the hardening steps, bbr:false drops bbr", () => {
@@ -222,7 +225,7 @@ test("deploySteps: full pipeline run twice — run 2 idempotent (R11.3)", async 
 // ------------------------------------------- M3: full-pipeline M8 idempotency
 
 /**
- * M3: the strongest idempotency net — run the FULL 28-step `deploySteps`
+ * M3: the strongest idempotency net — run the FULL 29-step `deploySteps`
  * pipeline twice on a stateful FakeRemote (run 1: a fresh box, i.e. v6
  * enabled + stock default site present) and assert run 2 contributes
  * ZERO M8 mutations: no `sysctl -p`/`-w`, no drop-in removal, no
@@ -232,7 +235,7 @@ test("deploySteps: full pipeline run twice — run 2 idempotent (R11.3)", async 
  * run-2 mutation list; this test adds the M8-specific status pins and
  * the upload freeze R11.3 lacks.)
  */
-test("deploySteps: full 28-step pipeline twice — run 2 contributes zero M8 mutations (M3)", async () => {
+test("deploySteps: full 29-step pipeline twice — run 2 contributes zero M8 mutations (M3)", async () => {
   const remote = new FakeRemote({ listeningPorts: [443] });
   const c: StepCtx = {
     name: "main",
@@ -249,7 +252,7 @@ test("deploySteps: full 28-step pipeline twice — run 2 contributes zero M8 mut
 
   const report1 = await runSteps(deploySteps(c, fixtureConfig, opts), remote, c, { quiet: true });
   assert.equal(report1.failed, false, `run 1 failed: ${JSON.stringify(report1.results)}`);
-  assert.equal(report1.results.length, 28, "all 28 deploy steps ran");
+  assert.equal(report1.results.length, 29, "all 29 deploy steps ran");
   const byName1 = new Map(report1.results.map((r) => [r.name, r.status]));
   // Fresh box: both M8 steps must actually do work in run 1.
   assert.equal(byName1.get("Configure IPv6"), "changed");
