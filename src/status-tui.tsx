@@ -165,6 +165,9 @@ export function StatusTui({ collect, refreshMs = 5000 }: StatusTuiProps) {
             <Text dimColor>{h.detail}</Text>
           </Text>
           <Text>
+            <Text dimColor>ipv6</Text> {d.ipv6}
+          </Text>
+          <Text>
             <Text dimColor>cert</Text>{" "}
             {d.cert === null ? (
               <Text dimColor>not run yet (r to run)</Text>

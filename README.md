@@ -29,6 +29,8 @@ anything touches the server.
    xray: v26.3.27            # hard pin; install step verifies on drift
    sshPort: 22
    sshKey: /home/me/.ssh/id_ed25519   # optional; default SSH key resolution
+   # allowIPv6: false        # v4-only is the default; `true` keeps the
+                              # provider's IPv6 (opt-out of the disable step)
    clients:
      - name: default
        limitIp: 0            # 0 = unlimited concurrent ips
@@ -42,9 +44,10 @@ anything touches the server.
    ```
 
    The pipeline runs: preflight (OS, disk, ssh port, DNS, host-key capture) →
-   packages → hardening (tz, unattended-upgrades, sshd, fail2ban, BBR, ufw) →
-   pinned Xray install → Xray deploy + verify (unit active, listening on
-   :443, REALITY handshake probe) → nginx (acme.sh, LE cert, decoy page,
+   packages → hardening (tz, unattended-upgrades, sshd, fail2ban, BBR,
+   Configure IPv6, ufw) → pinned Xray install → Xray deploy + verify
+   (unit active, listening on :443, REALITY handshake probe) → nginx
+   (stock default site removed first, then acme.sh, LE cert, decoy page,
    subscription, web vhost, public-path verifies). Every step is
    check-then-act, so re-running `deploy` on a live server is safe.
 
@@ -113,6 +116,7 @@ validator stay in sync.
 | `sniffing` | bool | `true` | Xray DNS sniffing (routing for non-HTTP traffic). |
 | `harden` | bool | `true` | Gates the hardening steps (timezone, unattended-upgrades, sshd hardening, fail2ban, ufw). |
 | `bbr` | bool | `true` | Gates the BBR congestion-control step. |
+| `allowIPv6` | bool | `false` | M8 network posture: the server is IPv4-only by default — the deploy's `Configure IPv6` step disables kernel IPv6 (persisted to `/etc/sysctl.d/99-viper-ipv6.conf`) so there is no v6 egress or inbound listener. `true` never disables, and re-enables if a previous deploy disabled it (detached interface bounce + poll; a missing v6 address is non-fatal — reboot completes it). Deploy-only knob: changing it on a live box means re-running `deploy` (idempotent); `viper status` shows the actual state. |
 | `clients` | list | `[{ name: default }]` | One entry per user: `name` (unique; used as the stat label + subscription tag) and `limitIp` (0–65535, default `0` = unlimited concurrent IPs). Each client gets a UUID in `state/<name>.yml`. |
 | `routing` | block | absent | **Opt-in Happ routing profile.** Presence = ship a `happ://routing/onadd/{base64}` line in `sub.txt` (and the deploy/sub tail); absence = no routing line. `name` is required; all other keys are Happ's documented profile field names, validated against that set, and merged over Happ's documented default profile (unset fields keep the defaults). Rule priority is Happ's: block → direct → proxy. |
 
@@ -172,9 +176,10 @@ state-pinned `shortId` are preserved.
 - **Removed**: xray unit (stopped + disabled), the xray binary + geoip/geosite
   assets, `/etc/xray/config.json`, viper's nginx vhosts, the acme renewal
   cron entry, the deployed page/subscription files.
-- **Kept (deliberately)**: the nginx package, `/root/.acme.sh/`, and all M4
-  hardening (ufw, sshd drop-in, fail2ban, BBR, unattended-upgrades) —
-  un-hardening is out of scope. The local `state/<name>.yml` is also kept, so
+- **Kept (deliberately)**: the nginx package, `/root/.acme.sh/`, and all
+  hardening (ufw, sshd drop-in, fail2ban, BBR, unattended-upgrades, and the
+  M8 IPv6 disable — teardown keeps the network posture; un-hardening is out
+  of scope). The local `state/<name>.yml` is also kept, so
   re-deploy stays possible.
 - **Cert + renewal caveat (read before decommissioning).** Teardown removes
   the acme.sh *renewal cron entry* only — `/root/.acme.sh/` (the issued cert

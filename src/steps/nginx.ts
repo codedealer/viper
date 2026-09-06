@@ -2,9 +2,9 @@
  * Nginx + cert + pages steps (M6) — the public web layer on the wire.
  *
  * Deploy order (`nginxSteps`):
- *   ensure-cron → acme-install → acme-cron → acme-vhost (:80) →
- *   cert-issue → cert-deploy → page-deploy → web-vhost (:8443) →
- *   verify-page → verify-sub → verify-404 → verify-cert
+ *   remove-stock-default-site → ensure-cron → acme-install → acme-cron →
+ *   acme-vhost (:80) → cert-issue → cert-deploy → page-deploy →
+ *   web-vhost (:8443) → verify-page → verify-sub → verify-404 → verify-cert
  *
  * Binding decisions honored (contract §5):
  *  - D1 (+A3): `--keylength 2048` and pinned `--server letsencrypt`
@@ -42,6 +42,9 @@ import { renderSub } from "../render/sub.js";
 // ----------------------------------------------------------------- paths
 
 export const ACME_SH = "/root/.acme.sh/acme.sh";
+/** Ubuntu's stock default site (symlink to sites-available/default),
+ *  which carries `listen [::]:80 default_server;` — M8 D3. */
+const STOCK_DEFAULT_SITE = "/etc/nginx/sites-enabled/default";
 const ACME_WEBROOT = "/var/www/acme";
 const ACME_VHOST = "/etc/nginx/sites-available/viper-acme.conf";
 const ACME_VHOST_ENABLED = "/etc/nginx/sites-enabled/viper-acme.conf";
@@ -130,6 +133,48 @@ async function deployVhost(
 }
 
 // ----------------------------------------------------------------- steps
+
+/**
+ * 0 — M8 D3: remove the stock nginx default site UNCONDITIONALLY (not
+ * knob-gated): its `listen [::]:80 default_server;` would crash nginx on
+ * the first reload after the kernel-level v6 disable (nginx re-binds all
+ * listeners), and it is decoy hygiene either way (unmatched Host: must
+ * hit viper's 404, not the nginx welcome page). Check-then-act: present ⇒
+ * rm + `nginx -t` + reload ⇒ changed; absent ⇒ ok.
+ */
+export function removeStockDefaultSiteStep(): Step {
+  return {
+    name: "Remove stock nginx default site",
+    run: async (conn): Promise<StepResult> => {
+      const present = await conn.run(`test -e ${STOCK_DEFAULT_SITE}`, { timeoutMs: 10_000 });
+      if (present.code !== 0) {
+        return { status: "ok", detail: "stock default site absent" };
+      }
+      const rm = await conn.run(`rm ${STOCK_DEFAULT_SITE}`, { timeoutMs: 10_000 });
+      if (rm.code !== 0) {
+        return {
+          status: "failed",
+          detail: `removing ${STOCK_DEFAULT_SITE} failed: ${errDetail(rm.stderr)}`,
+        };
+      }
+      // Validate BEFORE any reload (the M4/M6 discipline).
+      const test = await conn.run("nginx -t", { timeoutMs: 30_000 });
+      if (test.code !== 0) {
+        return {
+          status: "failed",
+          detail: `nginx -t rejected the config after default-site removal: ${errDetail(
+            test.stderr || test.stdout,
+          )}`,
+        };
+      }
+      const reload = await conn.run("systemctl reload nginx", { timeoutMs: 30_000 });
+      if (reload.code !== 0) {
+        return { status: "failed", detail: `nginx reload failed: ${errDetail(reload.stderr)}` };
+      }
+      return { status: "changed", detail: "stock default site removed, nginx reloaded" };
+    },
+  };
+}
 
 /** 1 — cron package + active cron service (renewal depends on crontab). */
 export function ensureCronStep(): Step {
@@ -479,6 +524,7 @@ export interface NginxStepOptions extends HardeningStepOptions {
 export function nginxSteps(ctx: StepCtx, _config: ServerConfig, opts: NginxStepOptions = {}): Step[] {
   const confs = renderNginx(ctx.config, ctx.state);
   return [
+    removeStockDefaultSiteStep(),
     ensureCronStep(),
     acmeInstallStep(),
     acmeCronStep(),

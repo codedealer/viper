@@ -169,6 +169,24 @@ export interface FakeRemoteOptions {
   certSubject?: string;
   certIssuer?: string;
   certNotAfter?: string;
+
+  // --- IPv6 (M8) ---
+  /** disable_ipv6 sysctls already 1/1 (default false = v6 enabled, like a
+   *  stock provider VPS with an auto-assigned v6). */
+  ipv6Disabled?: boolean;
+  /** A global v6 address is present (default true; the kernel purges it
+   *  when disable_ipv6 goes to 1). */
+  ipv6GlobalAddr?: boolean;
+  /** `sysctl -p` reports success but the sysctls stay 0 (verify-fail case). */
+  ipv6Stuck?: boolean;
+  /** The detached interface bounce triggers SLAAC reassignment (default
+   *  true); false = the v6 address never returns (reboot-fallback path). */
+  ipv6ReassignsAfterBounce?: boolean;
+  /** Primary interface from the v4 default route (default "eth0"). */
+  ipv6PrimaryIf?: string;
+  /** The stock /etc/nginx/sites-enabled/default is present (default true —
+   *  a stock Ubuntu box carries it). */
+  stockDefaultSite?: boolean;
 }
 
 /** The fake Let's Encrypt cert's md5 (stable across runs — run 2 = unchanged). */
@@ -216,6 +234,10 @@ export class FakeRemote implements SshConn {
   private nginxReloads = 0;
   private symlinks = new Set<string>();
   private dirs = new Set<string>();
+  /** IPv6 (M8) mutable state. */
+  private ipv6Disabled: boolean;
+  private ipv6GlobalAddr: boolean;
+  private stockDefaultSite: boolean;
 
   private readonly opts: Required<
     Pick<
@@ -316,6 +338,9 @@ export class FakeRemote implements SshConn {
     if (opts.subFile !== undefined) {
       this.files.set("/var/www/viper/main/sub.txt", opts.subFile);
     }
+    this.ipv6Disabled = opts.ipv6Disabled ?? false;
+    this.ipv6GlobalAddr = opts.ipv6GlobalAddr ?? true;
+    this.stockDefaultSite = opts.stockDefaultSite ?? true;
   }
 
   hostKeyFingerprint(): string | undefined {
@@ -480,6 +505,79 @@ export class FakeRemote implements SshConn {
       const value = cmd.split("=")[1] ?? "";
       this.sysctl.set(key, value);
       return ok(`${key} = ${value}`);
+    }
+
+    // --- IPv6 (M8) ---
+    if (cmd === "sysctl -n net.ipv6.conf.all.disable_ipv6 net.ipv6.conf.default.disable_ipv6") {
+      const v = this.ipv6Disabled ? "1" : "0";
+      return ok(`${v}\n${v}\n`);
+    }
+    if (cmd === "cat /etc/sysctl.d/99-viper-ipv6.conf 2>/dev/null") {
+      const f = this.files.get("/etc/sysctl.d/99-viper-ipv6.conf");
+      return f !== undefined ? ok(f) : fail(1, "");
+    }
+    if (cmd === "sysctl -p /etc/sysctl.d/99-viper-ipv6.conf") {
+      if (!this.files.has("/etc/sysctl.d/99-viper-ipv6.conf")) {
+        return fail(255, "sysctl: /etc/sysctl.d/99-viper-ipv6.conf: No such file or directory");
+      }
+      // Real sysctl -p echoes the file's contents on success.
+      const echoed = (this.files.get("/etc/sysctl.d/99-viper-ipv6.conf") ?? "").trimEnd() + "\n";
+      if (!this.opts.ipv6Stuck) {
+        this.ipv6Disabled = true;
+        // The kernel purges global v6 addresses (and the v6 default route)
+        // when disable_ipv6 is set.
+        this.ipv6GlobalAddr = false;
+      }
+      return ok(echoed);
+    }
+    if (cmd === "rm -f /etc/sysctl.d/99-viper-ipv6.conf") {
+      this.files.delete("/etc/sysctl.d/99-viper-ipv6.conf");
+      return ok();
+    }
+    if (cmd === "sysctl -w net.ipv6.conf.all.disable_ipv6=0") {
+      this.ipv6Disabled = false;
+      return ok("net.ipv6.conf.all.disable_ipv6 = 0");
+    }
+    if (cmd === "sysctl -w net.ipv6.conf.default.disable_ipv6=0") {
+      this.ipv6Disabled = false;
+      return ok("net.ipv6.conf.default.disable_ipv6 = 0");
+    }
+    if (cmd === "ip -6 addr show scope global") {
+      if (!this.ipv6GlobalAddr || this.ipv6Disabled) return ok("");
+      return ok(
+        "2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP group default \\\n" +
+          "    link/ether 02:42:ac:11:00:02 brd ff:ff:ff:ff:ff:ff\\n" +
+          "    inet6 2a12:bec4:152d:100::122/56 scope global dynamic mngtmpaddr \\\n" +
+          "       valid_lft forever preferred_lft forever\\n",
+      );
+    }
+    if (cmd === "ip -6 route show default") {
+      if (this.ipv6Disabled || !this.ipv6GlobalAddr) return ok("");
+      return ok("default via fe80::1 dev eth0 \\n");
+    }
+    if (cmd === "ip -4 route show default | awk '/default/{print $5;exit}'") {
+      return ok(`${this.opts.ipv6PrimaryIf ?? "eth0"}\n`);
+    }
+    const bounce = cmd.match(
+      /^nohup sh -c 'sleep 1; ip link set dev (\S+) down; sleep 2; ip link set dev \1 up' >\/tmp\/viper-ipv6-rev\.log 2>&1 &$/,
+    );
+    if (bounce !== null) {
+      if (this.opts.ipv6ReassignsAfterBounce !== false && !this.ipv6Disabled) {
+        this.ipv6GlobalAddr = true;
+      }
+      return ok();
+    }
+
+    // --- stock nginx default site (M8 D3) ---
+    if (cmd === "test -e /etc/nginx/sites-enabled/default") {
+      return this.stockDefaultSite ? ok() : fail(1, "");
+    }
+    if (cmd === "rm /etc/nginx/sites-enabled/default") {
+      if (!this.stockDefaultSite) {
+        return fail(1, "rm: cannot remove '/etc/nginx/sites-enabled/default': No such file or directory");
+      }
+      this.stockDefaultSite = false;
+      return ok();
     }
 
     // --- ufw ---
@@ -1063,6 +1161,10 @@ export class FakeRemote implements SshConn {
       c === "systemctl restart fail2ban" ||
       c === "systemctl restart sshd 2>/dev/null || systemctl restart ssh" ||
       c.startsWith("sysctl -w ") ||
+      c.startsWith("sysctl -p ") ||
+      c === "rm -f /etc/sysctl.d/99-viper-ipv6.conf" ||
+      c.startsWith("nohup sh -c 'sleep 1; ip link set dev ") ||
+      c === "rm /etc/nginx/sites-enabled/default" ||
       c === "modprobe tcp_bbr 2>/dev/null" ||
       c.startsWith("ufw allow ") ||
       c.startsWith("ufw default ") ||

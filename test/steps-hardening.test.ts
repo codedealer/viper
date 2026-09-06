@@ -7,13 +7,16 @@ import {
   sshStep,
   fail2banStep,
   bbrStep,
+  ipv6Step,
   ufwStep,
   renderAutoUpgradesConf,
   renderSshdDropin,
   renderBbrSysctlConf,
+  renderIpv6DisableConf,
   AUTO_UPGRADES_PATH,
   SSHD_DROPIN_PATH,
   BBR_SYCTL_PATH,
+  IPV6_SYCTL_PATH,
 } from "../src/steps/hardening.js";
 import { FakeRemote } from "./fake-remote.js";
 import { fixtureConfig, fixtureState } from "./fixtures.js";
@@ -377,6 +380,116 @@ test("bbr: live bbr+fq with stale persist file → re-persisted", async () => {
   assert.equal(remote.files.get(BBR_SYCTL_PATH), renderBbrSysctlConf());
 });
 
+// --------------------------------------------------------------- ipv6 (M8)
+
+const POLL_FAST = { attempts: 5, intervalMs: 1 };
+
+test("ipv6: fresh box (sysctl 0/0) → conf written, applied, verified → changed; second run ok", async () => {
+  const remote = new FakeRemote(); // v6 enabled + global v6 addr by default
+  const c = ctx();
+  const step = ipv6Step();
+  const first = await step.run(remote, c);
+  assert.equal(first.status, "changed");
+  assert.match(first.detail ?? "", /IPv6 disabled \(v4-only\)/);
+  const up = remote.uploads.find((u) => u.remote === IPV6_SYCTL_PATH);
+  assert.ok(up !== undefined, "persisted via SFTP, not heredoc");
+  assert.equal(up?.content, renderIpv6DisableConf());
+  assertGolden(import.meta.url, "sysctl-99-viper-ipv6.conf", renderIpv6DisableConf());
+  const cmds = remote.commands;
+  const checkIdx = cmds.indexOf(
+    "sysctl -n net.ipv6.conf.all.disable_ipv6 net.ipv6.conf.default.disable_ipv6",
+  );
+  const catIdx = cmds.indexOf(`cat ${IPV6_SYCTL_PATH} 2>/dev/null`);
+  const applyIdx = cmds.indexOf(`sysctl -p ${IPV6_SYCTL_PATH}`);
+  assert.ok(checkIdx >= 0 && catIdx > checkIdx && applyIdx > catIdx, "check → content check → apply");
+  // The three-part verification comes AFTER the apply.
+  assert.ok(cmds.indexOf("ip -6 addr show scope global", applyIdx) > applyIdx);
+  assert.ok(cmds.indexOf("ip -6 route show default") > applyIdx);
+
+  const mutAfterRun1 = remote.mutatingCommands().length;
+  const uploadsAfterRun1 = remote.uploads.length;
+  const second = await step.run(remote, c);
+  assert.equal(second.status, "ok");
+  assert.match(second.detail ?? "", /already v4-only/);
+  assert.equal(remote.mutatingCommands().length, mutAfterRun1, "run 2 issues zero mutations");
+  assert.equal(remote.uploads.length, uploadsAfterRun1, "no re-upload on the idempotent run");
+});
+
+test("ipv6: already 1/1 → ok, zero mutations", async () => {
+  const remote = new FakeRemote({ ipv6Disabled: true, ipv6GlobalAddr: false });
+  const res = await ipv6Step().run(remote, ctx());
+  assert.equal(res.status, "ok");
+  assert.match(res.detail ?? "", /already v4-only/);
+  assert.deepEqual(remote.mutatingCommands(), []);
+  assert.ok(!remote.commands.some((x) => x.startsWith("sysctl -p")), "no apply on the ok path");
+});
+
+test("ipv6: allowIPv6 true, sysctl 0/0 → skipped, zero mutations", async () => {
+  const remote = new FakeRemote();
+  const res = await ipv6Step().run(remote, ctx({ config: { ...fixtureConfig, allowIPv6: true } }));
+  assert.equal(res.status, "skipped");
+  assert.match(res.detail ?? "", /allowIPv6: true, v6 left as-is/);
+  assert.deepEqual(remote.mutatingCommands(), []);
+});
+
+test("ipv6: apply succeeds but verify fails (sysctls + v6 remain) → failed + diagnostics", async () => {
+  const remote = new FakeRemote({ ipv6Stuck: true });
+  const res = await ipv6Step().run(remote, ctx());
+  assert.equal(res.status, "failed");
+  assert.match(res.detail ?? "", /verification failed/);
+  assert.match(res.detail ?? "", /sysctl disable_ipv6 0\/0 \(expected 1\/1\)/);
+  assert.match(res.detail ?? "", /global v6 address remains/);
+});
+
+test("ipv6: re-enable (flag true, sysctl 1/1) → file removed, sysctl 0, detached bounce, poll → changed", async () => {
+  const remote = new FakeRemote({ ipv6Disabled: true, ipv6GlobalAddr: false });
+  remote.files.set(IPV6_SYCTL_PATH, renderIpv6DisableConf());
+  const c = ctx({ config: { ...fixtureConfig, allowIPv6: true } });
+  const res = await ipv6Step({ poll: POLL_FAST }).run(remote, c);
+  assert.equal(res.status, "changed");
+  assert.match(res.detail ?? "", /re-enabled IPv6 \(global v6 on eth0\)/);
+  assert.ok(!remote.files.has(IPV6_SYCTL_PATH), "viper's disable drop-in removed");
+  const cmds = remote.commands;
+  const rmIdx = cmds.indexOf(`rm -f ${IPV6_SYCTL_PATH}`);
+  const wAll = cmds.indexOf("sysctl -w net.ipv6.conf.all.disable_ipv6=0");
+  const wDef = cmds.indexOf("sysctl -w net.ipv6.conf.default.disable_ipv6=0");
+  const bounceIdx = cmds.findIndex((x) => x.startsWith("nohup sh -c 'sleep 1; ip link set dev "));
+  const pollIdx = cmds.indexOf("ip -6 addr show scope global", bounceIdx);
+  assert.ok(rmIdx >= 0 && wAll > rmIdx && wDef > wAll, "rm → sysctl -w all → default");
+  assert.ok(bounceIdx > wDef, "bounce after the sysctls");
+  assert.ok(pollIdx > bounceIdx, "poll after the bounce");
+  assert.match(
+    cmds[bounceIdx] ?? "",
+    /^nohup sh -c 'sleep 1; ip link set dev eth0 down; sleep 2; ip link set dev eth0 up' >\/tmp\/viper-ipv6-rev\.log 2>&1 &$/,
+  );
+});
+
+test("ipv6: re-enable but no address after the bounce → changed + non-fatal warning", async () => {
+  const remote = new FakeRemote({
+    ipv6Disabled: true,
+    ipv6GlobalAddr: false,
+    ipv6ReassignsAfterBounce: false,
+  });
+  const c = ctx({ config: { ...fixtureConfig, allowIPv6: true } });
+  const res = await ipv6Step({ poll: POLL_FAST }).run(remote, c);
+  assert.equal(res.status, "changed");
+  assert.match(res.detail ?? "", /re-enabled; v6 address not yet assigned \(reboot to complete\)/);
+});
+
+test("ipv6: re-enable with no detectable primary interface → no bounce, warning status", async () => {
+  const remote = new FakeRemote({
+    ipv6Disabled: true,
+    ipv6GlobalAddr: false,
+    ipv6ReassignsAfterBounce: false,
+    ipv6PrimaryIf: "",
+  });
+  const c = ctx({ config: { ...fixtureConfig, allowIPv6: true } });
+  const res = await ipv6Step({ poll: POLL_FAST }).run(remote, c);
+  assert.equal(res.status, "changed");
+  assert.match(res.detail ?? "", /reboot to complete/);
+  assert.ok(!remote.commands.some((x) => x.startsWith("nohup sh -c")), "no bounce without an interface");
+});
+
 // ----------------------------------------------------------------- ufw
 
 test("ufw: fresh box → allows BEFORE enable, no `ufw limit`, custom ports only; second run fully ok", async () => {
@@ -520,6 +633,7 @@ const NAMES = {
   ssh: "Harden SSH configuration",
   f2b: "Enable fail2ban",
   bbr: "Enable BBR congestion control",
+  ipv6: "Configure IPv6",
   ufw: "Configure firewall",
 };
 
@@ -527,7 +641,7 @@ function stepNames(steps: { name: string }[]): string[] {
   return steps.map((s) => s.name);
 }
 
-test("hardeningSteps: full pipeline (harden+bbr) — the plan's 8-step order", () => {
+test("hardeningSteps: full pipeline (harden+bbr) — the plan's order incl. M8 ipv6", () => {
   const steps = hardeningSteps(ctx(), fixtureConfig);
   assert.deepEqual(stepNames(steps), [
     NAMES.preflight,
@@ -537,26 +651,36 @@ test("hardeningSteps: full pipeline (harden+bbr) — the plan's 8-step order", (
     NAMES.ssh,
     NAMES.f2b,
     NAMES.bbr,
+    NAMES.ipv6,
     NAMES.ufw,
   ]);
 });
 
-test("hardeningSteps: harden:false → no tz/auto/ssh/fail2ban/ufw; bbr kept", () => {
+test("hardeningSteps: harden:false → no tz/auto/ssh/fail2ban/ufw; bbr + ipv6 kept", () => {
   const cfg = { ...fixtureConfig, harden: false };
   const steps = hardeningSteps(ctx({ config: cfg }), cfg);
-  assert.deepEqual(stepNames(steps), [NAMES.preflight, NAMES.packages, NAMES.bbr]);
+  // M8: the IPv6 step is independent of the `harden` gate (own knob).
+  assert.deepEqual(stepNames(steps), [NAMES.preflight, NAMES.packages, NAMES.bbr, NAMES.ipv6]);
 });
 
 test("hardeningSteps: bbr:false → no bbr; everything else kept", () => {
   const cfg = { ...fixtureConfig, bbr: false };
   const steps = hardeningSteps(ctx({ config: cfg }), cfg);
-  assert.equal(steps.length, 7);
-  assert.ok(!stepNames(steps).includes(NAMES.bbr));
-  assert.ok(stepNames(steps).includes(NAMES.ufw));
+  assert.equal(steps.length, 8);
+  const names = stepNames(steps);
+  assert.ok(!names.includes(NAMES.bbr));
+  assert.ok(names.includes(NAMES.ipv6));
+  assert.ok(names.indexOf(NAMES.ipv6) < names.indexOf(NAMES.ufw), "ipv6 still before ufw");
 });
 
-test("hardeningSteps: both off → only preflight + packages", () => {
+test("hardeningSteps: both off → preflight + packages + ipv6", () => {
   const cfg = { ...fixtureConfig, harden: false, bbr: false };
   const steps = hardeningSteps(ctx({ config: cfg }), cfg);
-  assert.deepEqual(stepNames(steps), [NAMES.preflight, NAMES.packages]);
+  assert.deepEqual(stepNames(steps), [NAMES.preflight, NAMES.packages, NAMES.ipv6]);
+});
+
+test("hardeningSteps: allowIPv6:true does NOT drop the step (skip is a status, not an un-wire)", () => {
+  const cfg = { ...fixtureConfig, allowIPv6: true };
+  const steps = hardeningSteps(ctx({ config: cfg }), cfg);
+  assert.ok(stepNames(steps).includes(NAMES.ipv6));
 });

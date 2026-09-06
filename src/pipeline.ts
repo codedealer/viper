@@ -5,9 +5,11 @@
  * are unit-tested so wiring regressions are caught without a server.
  *
  *  - `deploySteps` — fresh VPS, full pipeline:
- *      preflight → packages → hardening (knob-gated) →
+ *      preflight → packages → hardening (knob-gated; M8: Configure IPv6
+ *      after BBR, before ufw — own `allowIPv6` knob, deploy-only) →
  *      xray install → xray deploy → xray unit/listening verify →
- *      nginx (12 M6 steps) → REALITY handshake probe →
+ *      nginx (13 steps, first = remove stock default site, M8 D3) →
+ *      REALITY handshake probe →
  *      public verify (M9 local probe, last — the acceptance test of
  *      the whole deployment; skipped via `skipPublicVerify`)
  *    Idempotent by construction (every step is check-then-act except the

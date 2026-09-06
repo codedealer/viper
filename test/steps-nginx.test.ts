@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   nginxSteps,
   nginxTeardownSteps,
+  removeStockDefaultSiteStep,
   ensureCronStep,
   acmeInstallStep,
   acmeCronStep,
@@ -45,6 +46,52 @@ async function deploy(remote: FakeRemote, c: StepCtx = ctx()) {
   assert.equal(report.failed, false, `pipeline failed: ${JSON.stringify(report.results)}`);
   return report;
 }
+
+// --------------------------------------------------- stock default site
+
+test("remove-stock-default-site: present → rm + nginx -t + reload → changed; second run ok", async () => {
+  const remote = new FakeRemote(); // a stock box carries sites-enabled/default
+  const step = removeStockDefaultSiteStep();
+  const first = await step.run(remote, ctx());
+  assert.equal(first.status, "changed");
+  assert.match(first.detail ?? "", /stock default site removed/);
+  const cmds = remote.commands;
+  const rmIdx = cmds.indexOf("rm /etc/nginx/sites-enabled/default");
+  const tIdx = cmds.indexOf("nginx -t");
+  const rIdx = cmds.indexOf("systemctl reload nginx");
+  assert.ok(rmIdx >= 0, "stock site removed");
+  assert.ok(tIdx > rmIdx, "nginx -t after the removal");
+  assert.ok(rIdx > tIdx, "reload only after a passing nginx -t");
+  assert.equal(remote.nginxReloadCount, 1);
+
+  const second = await step.run(remote, ctx());
+  assert.equal(second.status, "ok");
+  assert.match(second.detail ?? "", /absent/);
+  assert.equal(remote.nginxReloadCount, 1, "no reload on the idempotent run");
+});
+
+test("remove-stock-default-site: absent → ok, zero mutations", async () => {
+  const remote = new FakeRemote({ stockDefaultSite: false });
+  const res = await removeStockDefaultSiteStep().run(remote, ctx());
+  assert.equal(res.status, "ok");
+  assert.match(res.detail ?? "", /absent/);
+  assert.deepEqual(remote.mutatingCommands(), []);
+});
+
+test("remove-stock-default-site: nginx -t rejects → failed, no reload", async () => {
+  const remote = new FakeRemote({
+    nginxTestFails: "nginx: [emerg] unexpected end of file, expecting }",
+  });
+  const res = await removeStockDefaultSiteStep().run(remote, ctx());
+  assert.equal(res.status, "failed");
+  assert.match(res.detail ?? "", /nginx -t rejected/);
+  assert.equal(remote.nginxReloadCount, 0);
+});
+
+test("nginxSteps: remove-stock-default-site is the FIRST nginx step (M8 D3)", () => {
+  const steps = nginxSteps(ctx(), fixtureConfig, stepOpts());
+  assert.equal(steps[0]?.name, "Remove stock nginx default site");
+});
 
 // ------------------------------------------------------------------ cron
 
@@ -391,6 +438,7 @@ test("pipeline run 1: full deploy, expected statuses and ordering", async () => 
   const remote = new FakeRemote();
   const report = await deploy(remote);
   const byName = new Map(report.results.map((r) => [r.name, r.status]));
+  assert.equal(byName.get("Remove stock nginx default site"), "changed");
   assert.equal(byName.get("Ensure cron service"), "ok");
   assert.equal(byName.get("Install acme.sh"), "changed");
   assert.equal(byName.get("Install acme renewal cron"), "changed");
@@ -404,14 +452,17 @@ test("pipeline run 1: full deploy, expected statuses and ordering", async () => 
   assert.equal(byName.get("Verify 404 (public path)"), "ok");
   assert.equal(byName.get("Verify Let's Encrypt cert (public path)"), "ok");
 
-  // Ordering: :80 vhost before issue; issue before install-cert;
+  // Ordering: default-site removal FIRST (before any reload the v6 disable
+  // makes mandatory); :80 vhost before issue; issue before install-cert;
   // pages before the web vhost (so verifies have something to serve).
   const names = report.results.map((r) => r.name);
+  assert.equal(names[0], "Remove stock nginx default site");
   assert.ok(names.indexOf("Deploy ACME vhost (:80)") < names.indexOf("Issue Let's Encrypt cert"));
   assert.ok(names.indexOf("Deploy cert") < names.indexOf("Deploy page + subscription"));
   assert.ok(names.indexOf("Deploy page + subscription") < names.indexOf("Deploy web vhost (:8443)"));
-  // Three reloads in a full deploy: acme-vhost, cert-deploy, web-vhost.
-  assert.equal(remote.nginxReloadCount, 3);
+  // Four reloads in a full deploy: default-site removal, acme-vhost,
+  // cert-deploy, web-vhost.
+  assert.equal(remote.nginxReloadCount, 4);
 });
 
 test("pipeline run 2: idempotent — zero observable changes except D3/D4 re-runs", async () => {
@@ -424,6 +475,7 @@ test("pipeline run 2: idempotent — zero observable changes except D3/D4 re-run
   const report = await deploy(remote);
   const byName = new Map(report.results.map((r) => [r.name, r.status]));
 
+  assert.equal(byName.get("Remove stock nginx default site"), "ok");
   assert.equal(byName.get("Ensure cron service"), "ok");
   assert.equal(byName.get("Install acme.sh"), "ok");
   assert.equal(byName.get("Install acme renewal cron"), "changed", "D3: always changed");

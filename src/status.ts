@@ -68,6 +68,8 @@ export interface StatusData {
   ram: string;
   disk: string;
   clients: ClientStatus[];
+  /** M8: actual IPv6 posture ("disabled (v4-only)" / "enabled (global v6 on <if>)" / "unknown"). */
+  ipv6: string;
   /** M5 probe logic, collectable (run on load + `r`, not every refresh). */
   handshake: HandshakeCheck;
   /** Borrowed LE cert (one-time on load is fine). */
@@ -105,6 +107,20 @@ export function statsApiFromRendered(config: ServerConfig, state: State): string
     throw new Error("status: rendered config.json has no api.listen — cannot query stats");
   }
   return listen;
+}
+
+/**
+ * M8: render the `ipv6:` status line from the two read-only probes
+ * (disable_ipv6 sysctls + global v6 address presence). Makes a
+ * flipped-but-not-yet-redeployed `allowIPv6` knob visible instead of
+ * silently inert (D5). Command failure degrades to "unknown".
+ */
+export function renderIpv6Status(sysctlOut: string | undefined, v6AddrOut: string | undefined): string {
+  if (sysctlOut === undefined || v6AddrOut === undefined) return "unknown";
+  const [all, def] = sysctlOut.trim().split(/\s+/);
+  if (all === "1" && def === "1") return "disabled (v4-only)";
+  const m = v6AddrOut.trim().match(/^\d+:\s*(\S+):/);
+  return m !== null ? `enabled (global v6 on ${m[1]})` : "enabled (no global v6 address)";
 }
 
 function fmtBytes(bytes: number): string {
@@ -171,32 +187,39 @@ export async function collectStatus(
   const runChecks = opts.runChecks === true;
   const subPath = `/${state.subHash}/sub.txt`;
 
-  const [version, unit, unitEnter, hostUptime, top, free, df, stats, subMtime] = await Promise.all([
-    conn.run(`${XRAY_BIN} version`, { timeoutMs: 15_000 }).catch(() => undefined),
-    conn.run("systemctl is-active xray", { timeoutMs: 15_000 }).catch(() => undefined),
-    conn
-      .run("systemctl show xray -p ActiveEnterTimestamp --value", {
-        timeoutMs: 15_000,
-      })
-      .catch(() => undefined),
-    conn.run("uptime -p", { timeoutMs: 15_000 }).catch(() => undefined),
-    conn.run("LC_ALL=C top -bn1", { timeoutMs: 20_000 }).catch(() => undefined),
-    conn.run("free -m", { timeoutMs: 15_000 }).catch(() => undefined),
-    conn.run("df -m /", { timeoutMs: 15_000 }).catch(() => undefined),
-    (async () => {
-      // statsApiFromRendered throws synchronously when the rendered
-      // config has no api.listen — keep it inside the promise so it
-      // degrades to undefined like every other command instead of
-      // rejecting the whole snapshot.
-      const api = statsApiFromRendered(config, state);
-      return conn.run(`${XRAY_BIN} api statsquery --server=${api}`, { timeoutMs: 30_000 });
-    })().catch(() => undefined),
-    conn
-      .run(`stat -c %y /var/www/viper/${config.name}/sub.txt 2>/dev/null`, {
-        timeoutMs: 15_000,
-      })
-      .catch(() => undefined),
-  ]);
+  const [version, unit, unitEnter, hostUptime, top, free, df, stats, subMtime, ipv6Sysctl, ipv6Addr] =
+    await Promise.all([
+      conn.run(`${XRAY_BIN} version`, { timeoutMs: 15_000 }).catch(() => undefined),
+      conn.run("systemctl is-active xray", { timeoutMs: 15_000 }).catch(() => undefined),
+      conn
+        .run("systemctl show xray -p ActiveEnterTimestamp --value", {
+          timeoutMs: 15_000,
+        })
+        .catch(() => undefined),
+      conn.run("uptime -p", { timeoutMs: 15_000 }).catch(() => undefined),
+      conn.run("LC_ALL=C top -bn1", { timeoutMs: 20_000 }).catch(() => undefined),
+      conn.run("free -m", { timeoutMs: 15_000 }).catch(() => undefined),
+      conn.run("df -m /", { timeoutMs: 15_000 }).catch(() => undefined),
+      (async () => {
+        // statsApiFromRendered throws synchronously when the rendered
+        // config has no api.listen — keep it inside the promise so it
+        // degrades to undefined like every other command instead of
+        // rejecting the whole snapshot.
+        const api = statsApiFromRendered(config, state);
+        return conn.run(`${XRAY_BIN} api statsquery --server=${api}`, { timeoutMs: 30_000 });
+      })().catch(() => undefined),
+      conn
+        .run(`stat -c %y /var/www/viper/${config.name}/sub.txt 2>/dev/null`, {
+          timeoutMs: 15_000,
+        })
+        .catch(() => undefined),
+      conn
+        .run("sysctl -n net.ipv6.conf.all.disable_ipv6 net.ipv6.conf.default.disable_ipv6", {
+          timeoutMs: 15_000,
+        })
+        .catch(() => undefined),
+      conn.run("ip -6 addr show scope global", { timeoutMs: 15_000 }).catch(() => undefined),
+    ]);
 
   let statValues: Map<string, number> = new Map();
   if (stats !== undefined && stats.code === 0) {
@@ -274,6 +297,10 @@ export async function collectStatus(
     ram: (free !== undefined ? parseFreeRam(free.stdout) : undefined) ?? "n/a",
     disk: (df !== undefined ? parseDfRoot(df.stdout) : undefined) ?? "n/a",
     clients,
+    ipv6: renderIpv6Status(
+      ipv6Sysctl !== undefined && ipv6Sysctl.code === 0 ? ipv6Sysctl.stdout : undefined,
+      ipv6Addr !== undefined && ipv6Addr.code === 0 ? ipv6Addr.stdout : undefined,
+    ),
     handshake,
     cert,
     subPath,
@@ -324,6 +351,7 @@ export function renderStatusSnapshot(d: StatusData): string {
   const h = d.handshake;
   section("Checks", [
     `handshake: ${h.ok === null ? "not run yet (r to run)" : h.ok ? "OK" : "FAILED"} — ${h.detail}`,
+    `ipv6:      ${d.ipv6}`,
     d.cert === null
       ? "cert:      not run yet (r to run)"
       : `cert:      ${d.cert.subject}\n            issuer ${d.cert.issuer}, valid to ${d.cert.validTo}`,

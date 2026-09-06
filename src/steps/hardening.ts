@@ -1,6 +1,6 @@
 /**
- * Hardening steps (M4) — Meridian's semantics, ported:
- *   tz → auto-upgrades → ssh → fail2ban → bbr → ufw
+ * Hardening steps (M4 + M8 IPv6) — Meridian's semantics, ported:
+ *   tz → auto-upgrades → ssh → fail2ban → bbr → Configure IPv6 → ufw
  *
  * Rules honored throughout:
  *  - check-then-act; a second run in the same final state makes no
@@ -15,9 +15,17 @@
  *  - BBR: warn-not-fail (skipped + WARNING) on kernels without the
  *    tunables.
  */
+import type { SshConn } from "../ssh.js";
 import type { ServerConfig } from "../config.js";
 import type { Step, StepCtx, StepResult } from "./runner.js";
-import { detectSshdPorts, errDetail, uploadRendered, type HardeningStepOptions } from "./common.js";
+import {
+  detectSshdPorts,
+  errDetail,
+  poll,
+  uploadRendered,
+  type HardeningStepOptions,
+  type PollOptions,
+} from "./common.js";
 import { preflightStep } from "./preflight.js";
 import { packagesStep } from "./packages.js";
 
@@ -54,6 +62,19 @@ export function renderBbrSysctlConf(): string {
 export const AUTO_UPGRADES_PATH = "/etc/apt/apt.conf.d/20auto-upgrades";
 export const SSHD_DROPIN_PATH = "/etc/ssh/sshd_config.d/00-viper.conf";
 export const BBR_SYCTL_PATH = "/etc/sysctl.d/99-viper.conf";
+export const IPV6_SYCTL_PATH = "/etc/sysctl.d/99-viper-ipv6.conf";
+
+/**
+ * M8: read both disable_ipv6 sysctls in one round-trip (`sysctl -n` with
+ * two keys → one line per key). The plan's single check command.
+ */
+export const IPV6_SYSCTL_CHECK =
+  "sysctl -n net.ipv6.conf.all.disable_ipv6 net.ipv6.conf.default.disable_ipv6";
+
+/** M8: v4-only persistence (D1: kernel-level disable, viper's own drop-in). */
+export function renderIpv6DisableConf(): string {
+  return "net.ipv6.conf.all.disable_ipv6 = 1\nnet.ipv6.conf.default.disable_ipv6 = 1\n";
+}
 
 /**
  * Neutralize conflicting directives in OTHER drop-ins (cloud-init & co.)
@@ -352,6 +373,137 @@ export function bbrStep(): Step {
   };
 }
 
+/**
+ * M8 D4 re-enable path (allowIPv6 flipped false→true on a live box):
+ * delete viper's disable drop-in, clear both sysctls live, then bounce the
+ * primary interface to trigger SLAAC reassignment. SSH rides on that
+ * interface → the bounce runs DETACHED (nohup ... &) and the step polls
+ * for a global v6 address. No address within the poll window is non-fatal
+ * (reboot completes the assignment).
+ */
+async function reenableIpv6(conn: SshConn, pollOpts: PollOptions | undefined): Promise<StepResult> {
+  await conn.run(`rm -f ${IPV6_SYCTL_PATH}`, { timeoutMs: 10_000 });
+  for (const scope of ["all", "default"]) {
+    const key = `net.ipv6.conf.${scope}.disable_ipv6`;
+    const res = await conn.run(`sysctl -w ${key}=0`, { timeoutMs: 15_000 });
+    if (res.code !== 0) {
+      return { status: "failed", detail: `sysctl -w ${key}=0 failed: ${errDetail(res.stderr)}` };
+    }
+  }
+
+  // Primary interface from the v4 default route (D4's exact command).
+  const ifRes = await conn.run("ip -4 route show default | awk '/default/{print $5;exit}'", {
+    timeoutMs: 15_000,
+  });
+  const ifname = ifRes.code === 0 ? ifRes.stdout.trim() : "";
+  if (ifname !== "") {
+    // Detached: the down/up drops the SSH session itself.
+    await conn.run(
+      `nohup sh -c 'sleep 1; ip link set dev ${ifname} down; sleep 2; ip link set dev ${ifname} up' >/tmp/viper-ipv6-rev.log 2>&1 &`,
+      { timeoutMs: 15_000 },
+    );
+  }
+
+  const hasAddr = (out: string): string | undefined => {
+    const m = out.trim().match(/^\d+:\s*(\S+):/);
+    return m !== null ? (m[1] as string) : undefined;
+  };
+  const found = await poll(async () => {
+    try {
+      const res = await conn.run("ip -6 addr show scope global", { timeoutMs: 15_000 });
+      return res.code === 0 && res.stdout.trim() !== "";
+    } catch {
+      return false; // the connection rides on the bouncing interface
+    }
+  }, pollOpts ?? { attempts: 30, intervalMs: 1000 });
+  if (!found) {
+    return {
+      status: "changed",
+      detail: "re-enabled; v6 address not yet assigned (reboot to complete)",
+    };
+  }
+  const addr = await conn.run("ip -6 addr show scope global", { timeoutMs: 15_000 });
+  const iface = hasAddr(addr.stdout) ?? "";
+  return {
+    status: "changed",
+    detail: `re-enabled IPv6 (global v6 on ${iface})`,
+  };
+}
+
+/**
+ * M8: `Configure IPv6` — v4-only by default (D1/D2), `allowIPv6: true`
+ * opts out (never disables; re-enables if a previous deploy disabled it,
+ * D4). Independent of the `harden` gate (own knob, like `bbr`).
+ *
+ * Disable path: check-then-act — persist file written only on content
+ * diff, `sysctl -p` only on change, then a three-part verification
+ * (sysctls 1/1, no global v6 address — the kernel purges them —, no v6
+ * default route). A second run in the final state issues zero mutations.
+ */
+export function ipv6Step(opts: { poll?: PollOptions } = {}): Step {
+  return {
+    name: "Configure IPv6",
+    run: async (conn, ctx): Promise<StepResult> => {
+      const check = await conn.run(IPV6_SYSCTL_CHECK, { timeoutMs: 15_000 });
+      if (check.code !== 0) {
+        return { status: "failed", detail: `sysctl check failed: ${errDetail(check.stderr)}` };
+      }
+      const [all, def] = check.stdout.trim().split(/\s+/);
+      const disabled = all === "1" && def === "1";
+
+      if (ctx.config.allowIPv6 === true) {
+        if (disabled) return reenableIpv6(conn, opts.poll);
+        return { status: "skipped", detail: "allowIPv6: true, v6 left as-is" };
+      }
+      if (disabled) {
+        return { status: "ok", detail: "already v4-only" };
+      }
+
+      // Persist to viper's own drop-in (written only when content differs —
+      // a run that died between the SFTP persist and the `sysctl -p` is
+      // recovered here without a rewrite).
+      const persist = await conn.run(`cat ${IPV6_SYCTL_PATH} 2>/dev/null`, { timeoutMs: 15_000 });
+      if (!(persist.code === 0 && persist.stdout.trim() === renderIpv6DisableConf().trim())) {
+        await uploadRendered(conn, renderIpv6DisableConf(), IPV6_SYCTL_PATH, "99-viper-ipv6.conf");
+      }
+      const apply = await conn.run(`sysctl -p ${IPV6_SYCTL_PATH}`, { timeoutMs: 30_000 });
+      if (apply.code !== 0) {
+        return {
+          status: "failed",
+          detail: `sysctl -p ${IPV6_SYCTL_PATH} failed: ${errDetail(apply.stderr || apply.stdout)}`,
+        };
+      }
+
+      // Verify the disable actually took hold (apply rc is not the proof).
+      const vcheck = await conn.run(IPV6_SYSCTL_CHECK, { timeoutMs: 15_000 });
+      const [vall, vdef] = vcheck.code === 0 ? vcheck.stdout.trim().split(/\s+/) : ["?", "?"];
+      const gaddr = await conn.run("ip -6 addr show scope global", { timeoutMs: 15_000 });
+      const route = await conn.run("ip -6 route show default", { timeoutMs: 15_000 });
+      const problems: string[] = [];
+      if (vall !== "1" || vdef !== "1") {
+        problems.push(`sysctl disable_ipv6 ${vall}/${vdef} (expected 1/1)`);
+      }
+      if (gaddr.code !== 0) {
+        problems.push(`global v6 address check failed: ${errDetail(gaddr.stderr)}`);
+      } else if (gaddr.stdout.trim() !== "") {
+        problems.push(`global v6 address remains (${errDetail(gaddr.stdout.trim().split("\n")[0] ?? "")})`);
+      }
+      if (route.code !== 0) {
+        problems.push(`v6 default-route check failed: ${errDetail(route.stderr)}`);
+      } else if (route.stdout.trim() !== "") {
+        problems.push(`v6 default route remains (${errDetail(route.stdout.trim().split("\n")[0] ?? "")})`);
+      }
+      if (problems.length > 0) {
+        return {
+          status: "failed",
+          detail: `IPv6 disable applied but verification failed: ${problems.join("; ")}`,
+        };
+      }
+      return { status: "changed", detail: "IPv6 disabled (v4-only)" };
+    },
+  };
+}
+
 export function ufwStep(): Step {
   return {
     name: "Configure firewall",
@@ -461,14 +613,21 @@ export function ufwStep(): Step {
 // ------------------------------------------------------------ step list
 
 /**
- * The ordered M4 step list per the plan:
- *   preflight → packages → tz → auto-upgrades → ssh → fail2ban → bbr → ufw
+ * The ordered M4/M8 step list:
+ *   preflight → packages → tz → auto-upgrades → ssh → fail2ban → bbr →
+ *   Configure IPv6 → ufw
  *
  * Knob-gated: `harden: false` excludes tz/auto-upgrades/ssh/fail2ban/ufw
- * (not run, not traced); `bbr: false` excludes bbr. Preflight and
+ * (not run, not traced); `bbr: false` excludes bbr. The IPv6 step is
+ * independent of `harden` (its own knob: `allowIPv6`; M8 D2) and sits
+ * after BBR, before the firewall (the network cluster). Preflight and
  * packages always run.
  */
-export function hardeningSteps(_ctx: StepCtx, config: ServerConfig, opts: HardeningStepOptions = {}): Step[] {
+export function hardeningSteps(
+  _ctx: StepCtx,
+  config: ServerConfig,
+  opts: HardeningStepOptions & { poll?: PollOptions } = {},
+): Step[] {
   const steps: Step[] = [preflightStep(opts), packagesStep(opts)];
   if (config.harden) {
     steps.push(tzStep(), autoUpgradesStep(), sshStep(), fail2banStep());
@@ -476,6 +635,7 @@ export function hardeningSteps(_ctx: StepCtx, config: ServerConfig, opts: Harden
   if (config.bbr) {
     steps.push(bbrStep());
   }
+  steps.push(ipv6Step(opts));
   if (config.harden) {
     steps.push(ufwStep());
   }

@@ -19,6 +19,8 @@ const ctx: StepCtx = {
 const names = (steps: { name: string }[]) => steps.map((s) => s.name);
 
 const NGINX_STEPS = [
+  // M8 D3: first step of the nginx group (unconditional, both pipelines).
+  "Remove stock nginx default site",
   "Ensure cron service",
   "Install acme.sh",
   "Install acme renewal cron",
@@ -50,7 +52,7 @@ const HANDSHAKE_PROBE = "Verify REALITY handshake (probe)";
 /** M9: the public-path probe is the LAST step of both deploy and update. */
 const PUBLIC_VERIFY = "Verify public reachability (local probe)";
 
-test("deploySteps: full pipeline order (contract D1)", () => {
+test("deploySteps: full pipeline order (contract D1) — 28 steps (26 pre-M8)", () => {
   const got = names(deploySteps(ctx, fixtureConfig, {}));
   const expected = [
     "Preflight",
@@ -60,6 +62,8 @@ test("deploySteps: full pipeline order (contract D1)", () => {
     "Harden SSH configuration",
     "Enable fail2ban",
     "Enable BBR congestion control",
+    // M8: the network cluster — ipv6 after BBR, before the firewall.
+    "Configure IPv6",
     "Configure firewall",
     "Install pinned Xray",
     ...XRAY_DEPLOY_VERIFY,
@@ -68,6 +72,7 @@ test("deploySteps: full pipeline order (contract D1)", () => {
     PUBLIC_VERIFY,
   ];
   assert.deepEqual(got, expected);
+  assert.equal(got.length, 28, "deploy grew 26 -> 28 steps with M8");
 });
 
 test("deploySteps: harden:false drops the hardening steps, bbr:false drops bbr", () => {
@@ -84,14 +89,23 @@ test("deploySteps: harden:false drops the hardening steps, bbr:false drops bbr",
   assert.ok(noHarden.includes("Preflight"));
   assert.ok(noHarden.includes("Install system packages"));
   assert.ok(noHarden.includes("Enable BBR congestion control"));
+  // M8: the IPv6 step is independent of the `harden` gate.
+  assert.ok(noHarden.includes("Configure IPv6"));
 
   const noBbr = names(deploySteps(ctx, { ...fixtureConfig, bbr: false }, {}));
   assert.ok(!noBbr.includes("Enable BBR congestion control"));
-  assert.ok(noBbr.includes("Configure firewall"));
+  assert.ok(noBbr.includes("Configure IPv6"));
+  assert.ok(
+    noBbr.indexOf("Configure IPv6") < noBbr.indexOf("Configure firewall"),
+    "ipv6 stays before the firewall without bbr",
+  );
 });
 
 test("updateSteps: xray deploy + verify + nginx + handshake probe + public verify (contract D3)", () => {
   const got = names(updateSteps(ctx, fixtureConfig, {}));
+  // M8 D5: update order unchanged — the IPv6 step is deploy-only; the
+  // new nginx-group step (default-site removal, D3) rides with the nginx
+  // group in both pipelines.
   const expected = [...XRAY_DEPLOY_VERIFY, ...NGINX_STEPS, HANDSHAKE_PROBE, PUBLIC_VERIFY];
   assert.deepEqual(got, expected);
   for (const absent of [
@@ -99,6 +113,7 @@ test("updateSteps: xray deploy + verify + nginx + handshake probe + public verif
     "Install system packages",
     "Install pinned Xray",
     "Harden SSH configuration",
+    "Configure IPv6",
   ]) {
     assert.ok(!got.includes(absent), `update must not run ${absent}`);
   }

@@ -88,6 +88,13 @@ export interface ServerConfig {
   harden: boolean;
   /** Gates the BBR step (default true). */
   bbr: boolean;
+  /**
+   * M8: keep the provider's IPv6 (default false/absent = v4-only: the
+   * Configure IPv6 step disables v6; `true` never disables and re-enables
+   * if a previous deploy disabled it). Deploy-only knob: changing it on a
+   * live box means re-running `deploy` (idempotent).
+   */
+  allowIPv6?: boolean;
   /** Absent → no routing line in `sub.txt` (M8 opt-in by presence). */
   routing?: RoutingConfig;
 }
@@ -374,6 +381,7 @@ export function parseServerConfig(name: string, doc: unknown): ServerConfig {
     "sniffing",
     "harden",
     "bbr",
+    "allowIPv6",
     "clients",
     "routing",
   ]);
@@ -403,6 +411,7 @@ export function parseServerConfig(name: string, doc: unknown): ServerConfig {
 
   const maxTimediff = intField(d, "maxTimediff", root, 0, Number.MAX_SAFE_INTEGER, 0);
   const sshKey = optionalStringField(d, "sshKey", root);
+  const allowIPv6 = optionalBoolField(d, "allowIPv6", root);
   const routing = d.routing !== undefined ? parseRouting(d.routing, `${root}.routing`) : undefined;
 
   return {
@@ -424,6 +433,7 @@ export function parseServerConfig(name: string, doc: unknown): ServerConfig {
     sniffing: boolField(d, "sniffing", root, true),
     harden: boolField(d, "harden", root, true),
     bbr: boolField(d, "bbr", root, true),
+    ...(allowIPv6 !== undefined ? { allowIPv6 } : {}),
     clients: parseClients(d.clients ?? [{ name: "default" }], root),
     ...(routing !== undefined ? { routing } : {}),
   };

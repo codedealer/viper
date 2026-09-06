@@ -71,6 +71,28 @@ test("collectStatus: full snapshot with checks (M7 D7)", async () => {
   assert.equal(data.subPath, `/${fixtureState.subHash}/sub.txt`);
   assert.match(data.subMtime, /^2026-09-01 01:00:00/);
   assert.equal(typeof data.fetchedAt, "number");
+
+  // M8: the fake box has v6 enabled with a global address by default.
+  assert.equal(data.ipv6, "enabled (global v6 on eth0)");
+});
+
+test("collectStatus: ipv6 line reflects the actual kernel state (M8)", async () => {
+  const disabled = new FakeRemote({
+    xrayInstalled: true,
+    ipv6Disabled: true,
+    ipv6GlobalAddr: false,
+  });
+  const d = await collectStatus(disabled, fixtureConfig, fixtureState);
+  assert.equal(d.ipv6, "disabled (v4-only)");
+
+  const enabled = new FakeRemote({ xrayInstalled: true });
+  const e = await collectStatus(enabled, fixtureConfig, fixtureState);
+  assert.equal(e.ipv6, "enabled (global v6 on eth0)");
+
+  // sysctls not 1/1 but no global v6 address (edge: flipped mid-way).
+  const limbo = new FakeRemote({ xrayInstalled: true, ipv6GlobalAddr: false });
+  const l = await collectStatus(limbo, fixtureConfig, fixtureState);
+  assert.equal(l.ipv6, "enabled (no global v6 address)");
 });
 
 test("collectStatus: refresh without checks carries check results from prev", async () => {
@@ -135,6 +157,7 @@ test("collectStatus: fully failed connection degrades to n/a, never rejects (R7)
   assert.equal(data.xrayVersion, "unavailable");
   assert.equal(data.unitActive, false);
   assert.equal(data.subMtime, "n/a");
+  assert.equal(data.ipv6, "unknown", "ipv6 degrades like every other probe");
 });
 
 test("statsApiFromRendered: port comes from the rendered config.json", () => {
@@ -177,6 +200,7 @@ function fakeStatusData(): StatusData {
       },
     ],
     handshake: { ok: true, detail: "REALITY handshake OK (HTTP 204 via gstatic)" },
+    ipv6: "disabled (v4-only)",
     cert: {
       subject: "CN = vpn.example.com",
       issuer: "C = US, O = Let's Encrypt, CN = R3",
@@ -204,6 +228,7 @@ test("renderStatusSnapshot: plain-text panels (non-TTY path)", () => {
     "Clients",
     "default (123e4567-e89b-42d3-a456-426614174000): up 1 KiB, down 2 KiB",
     "handshake: OK",
+    "ipv6:      disabled (v4-only)",
     "cert:      CN = vpn.example.com",
     "path:    /deadbeefcafebabe1234567890abcdef/sub.txt",
     "mtime:   2026-09-01 01:00:00.000000000 +0000",

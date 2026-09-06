@@ -73,6 +73,18 @@ test("explicit knobs are honored", () => {
   ]);
 });
 
+test("allowIPv6: absent by default (v4-only is the default, M8)", () => {
+  const cfg = parseServerConfig("main", validDoc);
+  assert.ok(!("allowIPv6" in cfg), "allowIPv6 must be absent, not false-by-default");
+});
+
+test("allowIPv6: explicit true/false honored, non-boolean rejected (M8)", () => {
+  assert.equal(parseServerConfig("main", { ...validDoc, allowIPv6: true }).allowIPv6, true);
+  assert.equal(parseServerConfig("main", { ...validDoc, allowIPv6: false }).allowIPv6, false);
+  expectConfigError({ ...validDoc, allowIPv6: "yes" }, "main", "expected a boolean");
+  expectConfigError({ ...validDoc, allowIPv6: 1 }, "main", "expected a boolean");
+});
+
 test("harden/bbr knobs default true and honor explicit false", () => {
   const defaults = parseServerConfig("main", validDoc);
   assert.equal(defaults.harden, true);
