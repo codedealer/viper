@@ -462,6 +462,13 @@ test("ipv6: re-enable (flag true, sysctl 1/1) → file removed, sysctl 0, detach
     cmds[bounceIdx] ?? "",
     /^nohup sh -c 'sleep 1; ip link set dev eth0 down; sleep 2; ip link set dev eth0 up' >\/tmp\/viper-ipv6-rev\.log 2>&1 &$/,
   );
+  // M2: the success detail reuses the poll's output — exactly one
+  // `ip -6 addr show scope global` probe, no raced-empty extra call.
+  assert.equal(
+    cmds.filter((x) => x === "ip -6 addr show scope global").length,
+    1,
+    "no extra probe after a successful poll",
+  );
 });
 
 test("ipv6: re-enable but no address after the bounce → changed + non-fatal warning", async () => {

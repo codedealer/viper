@@ -139,14 +139,18 @@ async function deployVhost(
  * knob-gated): its `listen [::]:80 default_server;` would crash nginx on
  * the first reload after the kernel-level v6 disable (nginx re-binds all
  * listeners), and it is decoy hygiene either way (unmatched Host: must
- * hit viper's 404, not the nginx welcome page). Check-then-act: present ⇒
- * rm + `nginx -t` + reload ⇒ changed; absent ⇒ ok.
+ * hit viper's 404, not the nginx welcome page). Check-then-act:
+ * `test -e … || test -L …` (a broken symlink is still a site entry —
+ * `test -e` alone misses it) ⇒ rm + `nginx -t` + reload ⇒ changed;
+ * absent ⇒ ok.
  */
 export function removeStockDefaultSiteStep(): Step {
   return {
     name: "Remove stock nginx default site",
     run: async (conn): Promise<StepResult> => {
-      const present = await conn.run(`test -e ${STOCK_DEFAULT_SITE}`, { timeoutMs: 10_000 });
+      const present = await conn.run(`test -e ${STOCK_DEFAULT_SITE} || test -L ${STOCK_DEFAULT_SITE}`, {
+        timeoutMs: 10_000,
+      });
       if (present.code !== 0) {
         return { status: "ok", detail: "stock default site absent" };
       }

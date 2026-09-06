@@ -408,13 +408,21 @@ async function reenableIpv6(conn: SshConn, pollOpts: PollOptions | undefined): P
     const m = out.trim().match(/^\d+:\s*(\S+):/);
     return m !== null ? (m[1] as string) : undefined;
   };
+  // M2: capture the last non-empty poll output so the success detail can
+  // name the interface without a second probe (a raced-empty extra call
+  // would render "global v6 on " with no name).
+  let lastAddrOut = "";
   const found = await poll(async () => {
     try {
       const res = await conn.run("ip -6 addr show scope global", { timeoutMs: 15_000 });
-      return res.code === 0 && res.stdout.trim() !== "";
+      if (res.code === 0 && res.stdout.trim() !== "") {
+        lastAddrOut = res.stdout;
+        return true;
+      }
     } catch {
-      return false; // the connection rides on the bouncing interface
+      // the connection rides on the bouncing interface
     }
+    return false;
   }, pollOpts ?? { attempts: 30, intervalMs: 1000 });
   if (!found) {
     return {
@@ -422,8 +430,7 @@ async function reenableIpv6(conn: SshConn, pollOpts: PollOptions | undefined): P
       detail: "re-enabled; v6 address not yet assigned (reboot to complete)",
     };
   }
-  const addr = await conn.run("ip -6 addr show scope global", { timeoutMs: 15_000 });
-  const iface = hasAddr(addr.stdout) ?? "";
+  const iface = hasAddr(lastAddrOut) ?? "";
   return {
     status: "changed",
     detail: `re-enabled IPv6 (global v6 on ${iface})`,

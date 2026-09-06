@@ -78,6 +78,19 @@ test("remove-stock-default-site: absent → ok, zero mutations", async () => {
   assert.deepEqual(remote.mutatingCommands(), []);
 });
 
+test("remove-stock-default-site: broken symlink present ⇒ removed ⇒ changed (M1)", async () => {
+  // A broken symlink (target gone, link present) fails `test -e` but is
+  // still a site entry — the `test -e … || test -L …` check must catch it.
+  const remote = new FakeRemote({ stockDefaultSite: false, stockDefaultSiteBroken: true });
+  const res = await removeStockDefaultSiteStep().run(remote, ctx());
+  assert.equal(res.status, "changed");
+  assert.match(res.detail ?? "", /stock default site removed/);
+  assert.ok(remote.commands.includes("rm /etc/nginx/sites-enabled/default"));
+  assert.equal(remote.nginxReloadCount, 1);
+  const second = await removeStockDefaultSiteStep().run(remote, ctx());
+  assert.equal(second.status, "ok", "idempotent once the broken link is gone");
+});
+
 test("remove-stock-default-site: nginx -t rejects → failed, no reload", async () => {
   const remote = new FakeRemote({
     nginxTestFails: "nginx: [emerg] unexpected end of file, expecting }",

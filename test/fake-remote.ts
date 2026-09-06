@@ -187,6 +187,9 @@ export interface FakeRemoteOptions {
   /** The stock /etc/nginx/sites-enabled/default is present (default true —
    *  a stock Ubuntu box carries it). */
   stockDefaultSite?: boolean;
+  /** The stock default site exists only as a BROKEN symlink (M1):
+   *  `test -e` fails, `test -L` succeeds. */
+  stockDefaultSiteBroken?: boolean;
 }
 
 /** The fake Let's Encrypt cert's md5 (stable across runs — run 2 = unchanged). */
@@ -238,6 +241,7 @@ export class FakeRemote implements SshConn {
   private ipv6Disabled: boolean;
   private ipv6GlobalAddr: boolean;
   private stockDefaultSite: boolean;
+  private stockDefaultSiteBroken: boolean;
 
   private readonly opts: Required<
     Pick<
@@ -341,6 +345,7 @@ export class FakeRemote implements SshConn {
     this.ipv6Disabled = opts.ipv6Disabled ?? false;
     this.ipv6GlobalAddr = opts.ipv6GlobalAddr ?? true;
     this.stockDefaultSite = opts.stockDefaultSite ?? true;
+    this.stockDefaultSiteBroken = opts.stockDefaultSiteBroken ?? false;
   }
 
   hostKeyFingerprint(): string | undefined {
@@ -569,14 +574,17 @@ export class FakeRemote implements SshConn {
     }
 
     // --- stock nginx default site (M8 D3) ---
-    if (cmd === "test -e /etc/nginx/sites-enabled/default") {
-      return this.stockDefaultSite ? ok() : fail(1, "");
+    // M1: the step checks `test -e … || test -L …` — a broken symlink
+    // (target gone, link present) is still a site entry and must be removed.
+    if (cmd === "test -e /etc/nginx/sites-enabled/default || test -L /etc/nginx/sites-enabled/default") {
+      return this.stockDefaultSite || this.stockDefaultSiteBroken ? ok() : fail(1, "");
     }
     if (cmd === "rm /etc/nginx/sites-enabled/default") {
-      if (!this.stockDefaultSite) {
+      if (!this.stockDefaultSite && !this.stockDefaultSiteBroken) {
         return fail(1, "rm: cannot remove '/etc/nginx/sites-enabled/default': No such file or directory");
       }
       this.stockDefaultSite = false;
+      this.stockDefaultSiteBroken = false;
       return ok();
     }
 

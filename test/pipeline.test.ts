@@ -218,3 +218,68 @@ test("deploySteps: full pipeline run twice — run 2 idempotent (R11.3)", async 
   assert.ok(!run2.some((x) => x === "systemctl restart xray"), "no xray restart");
   assert.ok(!run2.some((x) => x.includes("apt-get ")), "no apt activity");
 });
+
+// ------------------------------------------- M3: full-pipeline M8 idempotency
+
+/**
+ * M3: the strongest idempotency net — run the FULL 28-step `deploySteps`
+ * pipeline twice on a stateful FakeRemote (run 1: a fresh box, i.e. v6
+ * enabled + stock default site present) and assert run 2 contributes
+ * ZERO M8 mutations: no `sysctl -p`/`-w`, no drop-in removal, no
+ * interface bounce, no default-site removal, and no deploy-artifact
+ * SFTP re-uploads (the probe's own sandbox config is the one exempt
+ * upload, matching R11.3's probe allowlist). (R11.3 above pins the full
+ * run-2 mutation list; this test adds the M8-specific status pins and
+ * the upload freeze R11.3 lacks.)
+ */
+test("deploySteps: full 28-step pipeline twice — run 2 contributes zero M8 mutations (M3)", async () => {
+  const remote = new FakeRemote({ listeningPorts: [443] });
+  const c: StepCtx = {
+    name: "main",
+    ip: fixtureConfig.ip,
+    config: fixtureConfig,
+    state: { ...fixtureState, installedPackages: [] },
+    artifacts: {},
+  };
+  const opts = {
+    heroBase64: "aGVsbG8=",
+    dnsResolver: async () => [fixtureConfig.ip],
+    skipPublicVerify: true,
+  };
+
+  const report1 = await runSteps(deploySteps(c, fixtureConfig, opts), remote, c, { quiet: true });
+  assert.equal(report1.failed, false, `run 1 failed: ${JSON.stringify(report1.results)}`);
+  assert.equal(report1.results.length, 28, "all 28 deploy steps ran");
+  const byName1 = new Map(report1.results.map((r) => [r.name, r.status]));
+  // Fresh box: both M8 steps must actually do work in run 1.
+  assert.equal(byName1.get("Configure IPv6"), "changed");
+  assert.equal(byName1.get("Remove stock nginx default site"), "changed");
+
+  const upBefore = remote.uploads.length;
+  const cmdBefore = remote.commands.length;
+  const report2 = await runSteps(deploySteps(c, fixtureConfig, opts), remote, c, { quiet: true });
+  assert.equal(report2.failed, false, `run 2 failed: ${JSON.stringify(report2.results)}`);
+  const byName2 = new Map(report2.results.map((r) => [r.name, r.status]));
+  assert.equal(byName2.get("Configure IPv6"), "ok");
+  assert.equal(byName2.get("Remove stock nginx default site"), "ok");
+
+  // Run 2 contributes zero M8 mutations.
+  const run2 = remote.commands.slice(cmdBefore);
+  assert.ok(!run2.some((x) => x.startsWith("sysctl -p ")), "no sysctl -p re-apply");
+  assert.ok(!run2.some((x) => x.startsWith("sysctl -w ")), "no sysctl -w (re-enable) on run 2");
+  assert.ok(!run2.includes("rm -f /etc/sysctl.d/99-viper-ipv6.conf"), "no drop-in removal");
+  assert.ok(!run2.some((x) => x.startsWith("nohup sh -c 'sleep 1; ip link set dev ")), "no interface bounce");
+  assert.ok(!run2.includes("rm /etc/nginx/sites-enabled/default"), "no default-site removal");
+  // (the `test -e … || test -L …` presence check is read-only — the rm
+  // above is the only default-site mutation, and it is pinned absent.)
+  // No deploy-artifact re-uploads in run 2 (ipv6 drop-in, xray
+  // config/unit, nginx confs, page, subscription). The ONLY upload run 2
+  // is entitled to is the probe's own sandbox config — the probe's
+  // per-run reap/teardown is already pinned in R11.3's allowlist.
+  const extraUploads = remote.uploads.slice(upBefore).map((u) => u.remote);
+  assert.deepEqual(
+    extraUploads,
+    ["/tmp/viper-probe/config.json"],
+    "only the probe's own sandbox config is re-written",
+  );
+});
