@@ -1,10 +1,17 @@
 /**
  * M5 step lists.
  *
- * `xraySteps` — the deploy pipeline (called by the M7 `deploy` /
- * `update` commands; live-verified in the M5 scratch harness):
- * install (hard-pinned) → deploy (tmp → -test → mv → restart) →
- * verify (unit active → :443 listening → REALITY handshake probe).
+ * `xraySteps` — the canonical M5 step list (live-verified in the M5
+ * scratch harness): install (hard-pinned) → deploy (tmp → -test →
+ * mv → restart) → verify (unit active → :443 listening → REALITY
+ * handshake probe).
+ *
+ * NB: the M7 pipeline (src/pipeline.ts) wires these steps explicitly
+ * and moves the REALITY handshake probe to AFTER the nginx steps —
+ * the probe needs the :8443 web vhost + cert live (Xray's Reality
+ * borrow dials it per handshake), which on a fresh box only exist
+ * after the nginx steps. This list keeps the M5 order for module
+ * tests.
  *
  * `xrayTeardownSteps` — exported for M7's `viper teardown`; NOT
  * executed live in the M5 loop.

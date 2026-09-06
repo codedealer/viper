@@ -37,8 +37,15 @@ const XRAY_DEPLOY_VERIFY = [
   "Deploy Xray configuration",
   "Verify Xray unit active",
   "Verify Xray listening on VPN port",
-  "Verify REALITY handshake (probe)",
 ];
+
+/**
+ * The REALITY handshake probe runs AFTER the nginx steps: the deployed
+ * server borrows its Reality cert from the :8443 web vhost live per
+ * handshake, and on a fresh box the vhost + cert only exist once the
+ * nginx steps have run (the M5 xray-triple order fails on fresh boxes).
+ */
+const HANDSHAKE_PROBE = "Verify REALITY handshake (probe)";
 
 /** M9: the public-path probe is the LAST step of both deploy and update. */
 const PUBLIC_VERIFY = "Verify public reachability (local probe)";
@@ -57,6 +64,7 @@ test("deploySteps: full pipeline order (contract D1)", () => {
     "Install pinned Xray",
     ...XRAY_DEPLOY_VERIFY,
     ...NGINX_STEPS,
+    HANDSHAKE_PROBE,
     PUBLIC_VERIFY,
   ];
   assert.deepEqual(got, expected);
@@ -82,9 +90,9 @@ test("deploySteps: harden:false drops the hardening steps, bbr:false drops bbr",
   assert.ok(noBbr.includes("Configure firewall"));
 });
 
-test("updateSteps: xray deploy + verify + nginx + public verify (contract D3)", () => {
+test("updateSteps: xray deploy + verify + nginx + handshake probe + public verify (contract D3)", () => {
   const got = names(updateSteps(ctx, fixtureConfig, {}));
-  const expected = [...XRAY_DEPLOY_VERIFY, ...NGINX_STEPS, PUBLIC_VERIFY];
+  const expected = [...XRAY_DEPLOY_VERIFY, ...NGINX_STEPS, HANDSHAKE_PROBE, PUBLIC_VERIFY];
   assert.deepEqual(got, expected);
   for (const absent of [
     "Preflight",
@@ -169,15 +177,16 @@ test("deploySteps: full pipeline run twice — run 2 idempotent (R11.3)", async 
   );
   assert.equal(report2.failed, false, `run 2 failed: ${JSON.stringify(report2.results)}`);
 
-  // Run 2's mutating surface is exactly: probe reap/teardown + the two
-  // always-runners (acme-cron D3, install-cert D4).
+  // Run 2's mutating surface is exactly: the two always-runners
+  // (acme-cron D3, install-cert D4) + the probe reap/teardown — now the
+  // probe runs AFTER the nginx steps (fresh-deploy ordering fix).
   const expectedRun2Mutations = [
-    "pkill -f 'xray run -c /tmp/viper-probe/[c]onfig.json' 2>/dev/null || true",
-    "kill 12345 2>/dev/null",
-    "rm -rf /tmp/viper-probe",
     ACME_CRON_CMD,
     `${ACME_SH} --issue -d ${DOMAIN} --server letsencrypt --webroot /var/www/acme --keylength 2048 2>&1`,
     `${ACME_SH} --install-cert -d ${DOMAIN} --key-file /etc/nginx/ssl/${DOMAIN}/privkey.pem --fullchain-file /etc/nginx/ssl/${DOMAIN}/fullchain.pem --reloadcmd "systemctl reload nginx" 2>&1`,
+    "pkill -f 'xray run -c /tmp/viper-probe/[c]onfig.json' 2>/dev/null || true",
+    "kill 12345 2>/dev/null",
+    "rm -rf /tmp/viper-probe",
   ];
   assert.deepEqual(remote.mutatingCommands().slice(mutBefore), expectedRun2Mutations);
 
