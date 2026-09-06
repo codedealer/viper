@@ -89,10 +89,15 @@ export interface FailedUnitsWarning {
 /** fail2ban sshd jail (checks path; carried over from `prev` on refresh). */
 export interface Fail2banWarning {
   state: WarningState;
-  /** Banned IP count for the jail ("Ban total"), null when unknown. */
+  /**
+   * Active banned-IP count for the jail ("Currently banned"; "Ban total"
+   * on builds whose per-jail status lacks that label), null when unknown.
+   */
   banned: number | null;
   /** Total failed attempts ("Total failed"), null when unknown/absent. */
   totalFailed: number | null;
+  /** Lifetime banned-IP count ("Total banned"), null when unknown/absent. */
+  totalBanned: number | null;
 }
 
 /**
@@ -206,6 +211,67 @@ export const ERROR_LOG_TAIL_LINES = 5;
 export const CERT_WARN_DAYS = 14;
 /** Warn when the root filesystem is at or above this Use%. */
 export const DISK_WARN_PERCENT = 80;
+/**
+ * Cap on concurrent probe fan-out. sshd limits concurrent session channels
+ * per connection (`MaxSessions`, default 10); live verification on nova
+ * (2026-09-06) showed the uncapped 16-concurrent refresh wave exceeding
+ * it — the excess channel opens fail with "open failed" and degrade
+ * several signals to unknown. 8 leaves headroom under any sane box config
+ * (paired with PROBE_CHANNEL_GAP_MS below).
+ */
+export const PROBE_CONCURRENCY = 8;
+/**
+ * Delay between one probe completing and the same pool worker's next
+ * channel open. OpenSSH only drops a session from its MaxSessions count
+ * once it has processed the client's channel close, which arrives ~1 RTT
+ * after the client observes the command's completion. Without the gap,
+ * rapid re-opens see the stale count and are rejected with "Channel open
+ * failure: open failed" (measured on nova, 2026-09-06: 8 fast completions
+ * + immediate 8 re-opens → 6 rejected; 100 ms gap → all pass). 150 ms ≈
+ * 2.7× the nova RTT (55 ms), covering boxes up to ~100 ms RTT.
+ */
+export const PROBE_CHANNEL_GAP_MS = 150;
+/**
+ * Separator line inside the merged error-log probe output, between the
+ * `wc -l` count and the `tail` lines.
+ */
+export const LOG_PROBE_MARKER = "---vipercut---";
+
+/**
+ * Single-command error-log probe: total line count, marker, then the last
+ * `ERROR_LOG_TAIL_LINES` lines — ONE ssh channel instead of two (keeps the
+ * fan-out under sshd's per-connection session cap, less ssh chatter).
+ * Exit code is the tail's: non-zero = file missing/unreadable.
+ */
+export function errorLogProbeCmd(path: string): string {
+  return `wc -l < ${path} 2>/dev/null; echo ${LOG_PROBE_MARKER}; tail -n ${ERROR_LOG_TAIL_LINES} ${path} 2>/dev/null`;
+}
+
+/**
+ * Run all jobs with at most `limit` in flight, preserving result order.
+ * Jobs keep their own per-probe degradation semantics (they are already
+ * `.catch(() => undefined)`-ed where constructed); the pool only bounds
+ * how many ssh channels overlap.
+ */
+async function runPooled<T>(jobs: Array<() => Promise<T>>, limit: number): Promise<T[]> {
+  const results = new Array<T>(jobs.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = next;
+      next += 1;
+      if (i >= jobs.length) return;
+      const job = jobs[i];
+      if (job === undefined) return;
+      results[i] = await job();
+      // Let the server finish tearing down this session (MaxSessions) before
+      // opening the next channel — see PROBE_CHANNEL_GAP_MS.
+      if (next < jobs.length) await new Promise((r) => setTimeout(r, PROBE_CHANNEL_GAP_MS));
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, jobs.length) }, () => worker()));
+  return results;
+}
 
 function fmtBytes(bytes: number): string {
   const units = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -266,23 +332,25 @@ export function certDaysLeft(validTo: string): number | null {
 }
 
 /**
- * Error-log signal from the `wc -l <` and `tail -n 5` probes. Any line in
- * these logs is a real problem (see `LogWarning`); a missing/unreadable file
- * degrades to `unknown` (we cannot see the window, so we don't claim it is
- * clean).
+ * Error-log signal from the merged `wc -l` + marker + `tail` probe
+ * (`errorLogProbeCmd`). Any line in these logs is a real problem (see
+ * `LogWarning`); a missing/unreadable file degrades to `unknown` (we cannot
+ * see the window, so we don't claim it is clean).
  */
-function logWarning(
-  countOut: { code: number; stdout: string } | undefined,
-  tailOut: { code: number; stdout: string } | undefined,
-): LogWarning {
-  if (tailOut === undefined || tailOut.code !== 0) {
+function logWarning(out: { code: number; stdout: string } | undefined): LogWarning {
+  if (out === undefined || out.code !== 0) {
     return { state: "unknown", total: null, recent: [] };
   }
-  const recent = tailOut.stdout.split("\n").filter((l) => l !== "");
-  const total = countOut !== undefined && countOut.code === 0 ? Number(countOut.stdout.trim()) : null;
+  const lines = out.stdout.split("\n");
+  const cut = lines.indexOf(LOG_PROBE_MARKER);
+  if (cut === -1) return { state: "unknown", total: null, recent: [] };
+  const countLines = lines.slice(0, cut);
+  const first = countLines[0];
+  const count = countLines.length === 1 && first !== undefined ? Number(first.trim()) : NaN;
+  const recent = lines.slice(cut + 1).filter((l) => l !== "");
   return {
     state: recent.length > 0 ? "warn" : "ok",
-    total: Number.isFinite(total as number) ? (total as number) : null,
+    total: Number.isFinite(count) ? count : null,
     recent: recent.slice(-ERROR_LOG_TAIL_LINES),
   };
 }
@@ -298,21 +366,27 @@ function failedUnitsWarning(res: { code: number; stdout: string } | undefined): 
 }
 
 /**
- * `fail2ban-client status sshd` → the jail's ban count. The per-jail status
- * reports the live ban count as "Ban total: N" (the "Currently banned: N"
- * line only exists in the GLOBAL `fail2ban-client status`); "Total failed"
- * gives the cumulative attempt count when present. Degrades to `unknown`
- * when fail2ban is not installed/running (non-zero exit).
+ * `fail2ban-client status sshd` → the jail's ACTIVE ban count. The per-jail
+ * status reports it as "Currently banned: N" (fail2ban 1.0.2 output,
+ * live-verified on nova 2026-09-06; labels there are tab-separated); builds
+ * whose per-jail status instead prints "Ban total: N" are covered by the
+ * fallback. "Total failed" / "Total banned" are cumulative context when
+ * present. Degrades to `unknown` when fail2ban is not installed/running
+ * (non-zero exit).
  */
 function fail2banWarning(res: { code: number; stdout: string } | undefined): Fail2banWarning {
-  if (res === undefined || res.code !== 0) return { state: "unknown", banned: null, totalFailed: null };
+  if (res === undefined || res.code !== 0) {
+    return { state: "unknown", banned: null, totalFailed: null, totalBanned: null };
+  }
   const num = (label: string): number | null => {
-    const m = res.stdout.match(new RegExp(`${label}: (\\d+)`));
+    const m = res.stdout.match(new RegExp(`${label}:\\s*(\\d+)`));
     return m !== null && m[1] !== undefined ? Number(m[1]) : null;
   };
-  const banned = num("Ban total");
-  if (banned === null) return { state: "unknown", banned: null, totalFailed: num("Total failed") };
-  return { state: banned > 0 ? "warn" : "ok", banned, totalFailed: num("Total failed") };
+  const banned = num("Currently banned") ?? num("Ban total");
+  const totalFailed = num("Total failed");
+  const totalBanned = num("Total banned");
+  if (banned === null) return { state: "unknown", banned: null, totalFailed, totalBanned };
+  return { state: banned > 0 ? "warn" : "ok", banned, totalFailed, totalBanned };
 }
 
 function certWarning(cert: CertInfo | null): CertWarning {
@@ -365,6 +439,9 @@ export function warningLines(w: Warnings): WarningLine[] {
         ? { label: "units", state: "warn", text: `${units.units.length} failed`, extra: units.units }
         : { label: "units", state: "unknown", text: "unknown", extra: [] };
   const f2b = w.fail2ban;
+  const f2bContext: string[] = [];
+  if (f2b.totalFailed !== null) f2bContext.push(`${f2b.totalFailed} failed`);
+  if (f2b.totalBanned !== null) f2bContext.push(`${f2b.totalBanned} lifetime`);
   const f2bLine: WarningLine =
     f2b.state === "ok"
       ? { label: "fail2ban", state: "ok", text: "0 banned", extra: [] }
@@ -372,7 +449,7 @@ export function warningLines(w: Warnings): WarningLine[] {
         ? {
             label: "fail2ban",
             state: "warn",
-            text: `${f2b.banned} banned${f2b.totalFailed !== null ? ` (total failed: ${f2b.totalFailed})` : ""}`,
+            text: `${f2b.banned} banned${f2bContext.length > 0 ? ` (${f2bContext.join(", ")})` : ""}`,
             extra: [],
           }
         : { label: "fail2ban", state: "unknown", text: "unknown (not run yet)", extra: [] };
@@ -424,55 +501,54 @@ export async function collectStatus(
     subMtime,
     ipv6Sysctl,
     ipv6Addr,
-    xrayLogCount,
-    xrayLogTail,
-    nginxLogCount,
-    nginxLogTail,
+    xrayLog,
+    nginxLog,
     failedUnits,
-  ] = await Promise.all([
-    conn.run(`${XRAY_BIN} version`, { timeoutMs: 15_000 }).catch(() => undefined),
-    conn.run("systemctl is-active xray", { timeoutMs: 15_000 }).catch(() => undefined),
-    conn
-      .run("systemctl show xray -p ActiveEnterTimestamp --value", {
-        timeoutMs: 15_000,
-      })
-      .catch(() => undefined),
-    conn.run("uptime -p", { timeoutMs: 15_000 }).catch(() => undefined),
-    conn.run("LC_ALL=C top -bn1", { timeoutMs: 20_000 }).catch(() => undefined),
-    conn.run("free -m", { timeoutMs: 15_000 }).catch(() => undefined),
-    conn.run("df -m /", { timeoutMs: 15_000 }).catch(() => undefined),
-    (async () => {
-      // statsApiFromRendered throws synchronously when the rendered
-      // config has no api.listen — keep it inside the promise so it
-      // degrades to undefined like every other command instead of
-      // rejecting the whole snapshot.
-      const api = statsApiFromRendered(config, state);
-      return conn.run(`${XRAY_BIN} api statsquery --server=${api}`, { timeoutMs: 30_000 });
-    })().catch(() => undefined),
-    conn
-      .run(`stat -c %y /var/www/viper/${config.name}/sub.txt 2>/dev/null`, {
-        timeoutMs: 15_000,
-      })
-      .catch(() => undefined),
-    conn
-      .run("sysctl -n net.ipv6.conf.all.disable_ipv6 net.ipv6.conf.default.disable_ipv6", {
-        timeoutMs: 15_000,
-      })
-      .catch(() => undefined),
-    conn.run("ip -6 addr show scope global", { timeoutMs: 15_000 }).catch(() => undefined),
-    // Warnings (refresh path): two cheap probes per error log + failed
-    // units. Disk pressure is derived from `df` above; fail2ban and the
-    // cert run on the checks path (see below).
-    conn.run(`wc -l < /var/log/xray/error.log 2>/dev/null`, { timeoutMs: 15_000 }).catch(() => undefined),
-    conn
-      .run(`tail -n ${ERROR_LOG_TAIL_LINES} /var/log/xray/error.log 2>/dev/null`, { timeoutMs: 15_000 })
-      .catch(() => undefined),
-    conn.run(`wc -l < /var/log/nginx/error.log 2>/dev/null`, { timeoutMs: 15_000 }).catch(() => undefined),
-    conn
-      .run(`tail -n ${ERROR_LOG_TAIL_LINES} /var/log/nginx/error.log 2>/dev/null`, { timeoutMs: 15_000 })
-      .catch(() => undefined),
-    conn.run("systemctl --failed --no-legend", { timeoutMs: 15_000 }).catch(() => undefined),
-  ]);
+  ] = await runPooled(
+    [
+      () => conn.run(`${XRAY_BIN} version`, { timeoutMs: 15_000 }).catch(() => undefined),
+      () => conn.run("systemctl is-active xray", { timeoutMs: 15_000 }).catch(() => undefined),
+      () =>
+        conn
+          .run("systemctl show xray -p ActiveEnterTimestamp --value", { timeoutMs: 15_000 })
+          .catch(() => undefined),
+      () => conn.run("uptime -p", { timeoutMs: 15_000 }).catch(() => undefined),
+      () => conn.run("LC_ALL=C top -bn1", { timeoutMs: 20_000 }).catch(() => undefined),
+      () => conn.run("free -m", { timeoutMs: 15_000 }).catch(() => undefined),
+      () => conn.run("df -m /", { timeoutMs: 15_000 }).catch(() => undefined),
+      () =>
+        (async () => {
+          // statsApiFromRendered throws synchronously when the rendered
+          // config has no api.listen — keep it inside the promise so it
+          // degrades to undefined like every other command instead of
+          // rejecting the whole snapshot.
+          const api = statsApiFromRendered(config, state);
+          return conn.run(`${XRAY_BIN} api statsquery --server=${api}`, { timeoutMs: 30_000 });
+        })().catch(() => undefined),
+      () =>
+        conn
+          .run(`stat -c %y /var/www/viper/${config.name}/sub.txt 2>/dev/null`, {
+            timeoutMs: 15_000,
+          })
+          .catch(() => undefined),
+      () =>
+        conn
+          .run("sysctl -n net.ipv6.conf.all.disable_ipv6 net.ipv6.conf.default.disable_ipv6", {
+            timeoutMs: 15_000,
+          })
+          .catch(() => undefined),
+      () => conn.run("ip -6 addr show scope global", { timeoutMs: 15_000 }).catch(() => undefined),
+      // Warnings (refresh path): ONE merged probe per error log + failed
+      // units. Disk pressure is derived from `df` above; fail2ban and the
+      // cert run on the checks path (see below).
+      () =>
+        conn.run(errorLogProbeCmd("/var/log/xray/error.log"), { timeoutMs: 15_000 }).catch(() => undefined),
+      () =>
+        conn.run(errorLogProbeCmd("/var/log/nginx/error.log"), { timeoutMs: 15_000 }).catch(() => undefined),
+      () => conn.run("systemctl --failed --no-legend", { timeoutMs: 15_000 }).catch(() => undefined),
+    ],
+    PROBE_CONCURRENCY,
+  );
 
   let statValues: Map<string, number> = new Map();
   if (stats !== undefined && stats.code === 0) {
@@ -500,7 +576,7 @@ export async function collectStatus(
   // fail2ban is a client call into the fail2ban server (IPC, slower than a
   // file tail) and changes rarely — checks path, carried from `prev`, the
   // same way as `handshake`/`cert`.
-  let fail2ban: Fail2banWarning = { state: "unknown", banned: null, totalFailed: null };
+  let fail2ban: Fail2banWarning = { state: "unknown", banned: null, totalFailed: null, totalBanned: null };
   if (runChecks) {
     const ctx: StepCtx = {
       name: config.name,
@@ -567,8 +643,8 @@ export async function collectStatus(
     handshake,
     cert,
     warnings: {
-      xrayLog: logWarning(xrayLogCount, xrayLogTail),
-      nginxLog: logWarning(nginxLogCount, nginxLogTail),
+      xrayLog: logWarning(xrayLog),
+      nginxLog: logWarning(nginxLog),
       failedUnits: failedUnitsWarning(failedUnits),
       fail2ban,
       cert: certWarning(cert),

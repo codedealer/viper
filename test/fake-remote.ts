@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { ERROR_LOG_TAIL_LINES, LOG_PROBE_MARKER } from "../src/status.js";
 import type { CommandResult, SshConn } from "../src/ssh.js";
 
 /**
@@ -187,10 +188,18 @@ export interface FakeRemoteOptions {
   failedUnits?: string[];
   /** `systemctl --failed` itself fails (probe degrades to unknown). */
   failedUnitsFails?: boolean;
-  /** fail2ban sshd jail ban count ("Ban total", default 0). */
+  /** fail2ban sshd jail ACTIVE ban count ("Currently banned", default 0). */
   fail2banBanned?: number;
   /** fail2ban sshd jail "Total failed" (default 0). */
   fail2banTotalFailed?: number;
+  /** fail2ban sshd jail "Total banned" (lifetime; default 0). */
+  fail2banTotalBanned?: number;
+  /**
+   * Per-jail output shape: "1.0.2" = the live nova box's (fail2ban
+   * 1.0.2-3ubuntu0.1: "Currently banned", tab-separated labels) or
+   * "legacy" = builds that print "Ban total" instead.
+   */
+  fail2banFormat?: "1.0.2" | "legacy";
   /** `fail2ban-client status sshd` fails (not installed / not running). */
   fail2banClientFails?: boolean;
 
@@ -1131,14 +1140,18 @@ export class FakeRemote implements SshConn {
       const missing =
         (name === "xray" ? this.opts.xrayErrorLogMissing : this.opts.nginxErrorLogMissing) === true;
       const content = (name === "xray" ? this.opts.xrayErrorLog : this.opts.nginxErrorLog) ?? "";
-      if (cmd === `wc -l < ${path} 2>/dev/null`) {
-        if (missing) return fail(1, `sh: 1: cannot open ${path}: Directory nonexistent`);
-        return ok(`${content === "" ? 0 : content.trimEnd().split("\n").length}\n`);
-      }
-      if (cmd === `tail -n 5 ${path} 2>/dev/null`) {
-        if (missing) return fail(1, `tail: cannot open '${path}' for reading: No such file or directory`);
+      if (
+        cmd ===
+        `wc -l < ${path} 2>/dev/null; echo ${LOG_PROBE_MARKER}; tail -n ${ERROR_LOG_TAIL_LINES} ${path} 2>/dev/null`
+      ) {
+        if (missing) {
+          // Compound: wc and tail both fail silently (stderr suppressed),
+          // the marker still prints, exit code is tail's (1).
+          return { stdout: `${LOG_PROBE_MARKER}\n`, stderr: "", code: 1 };
+        }
         const lines = content === "" ? [] : content.trimEnd().split("\n");
-        return ok(lines.slice(-5).join("\n") + (lines.length > 0 ? "\n" : ""));
+        const tail = lines.slice(-5).join("\n") + (lines.length > 0 ? "\n" : "");
+        return ok(`${lines.length}\n${LOG_PROBE_MARKER}\n${tail}`);
       }
       return null;
     };
@@ -1156,15 +1169,30 @@ export class FakeRemote implements SshConn {
         return fail(1, "Server returned unexpected error\nServer error: No such file");
       const banned = this.opts.fail2banBanned ?? 0;
       const totalFailed = this.opts.fail2banTotalFailed ?? 0;
+      const totalBanned = this.opts.fail2banTotalBanned ?? 0;
+      if (this.opts.fail2banFormat === "legacy") {
+        // Older per-jail shape: "Ban total" instead of "Currently banned".
+        return ok(
+          "Status for the jail: sshd\n" +
+            "|- Filter\n" +
+            `|  |- Total failed: ${totalFailed}\n` +
+            "|  `- Journal matches: _SYSTEMD_UNIT=sshd.service + _COMM=sshd\n" +
+            "`- Actions\n" +
+            `   \`- Ban total: ${banned}\n`,
+        );
+      }
+      // fail2ban 1.0.2 per-jail shape, live-captured from nova (2026-09-06):
+      // labels are tab-separated.
       return ok(
         "Status for the jail: sshd\n" +
           "|- Filter\n" +
-          "|  |- Current failed: 0\n" +
-          `|  |- Total failed: ${totalFailed}\n` +
-          "|  `- Journal matches: _SYSTEMD_UNIT=sshd.service + (__SUBSYSTEM_SYSTEMd+ )\n" +
+          "|  |- Currently failed:\t0\n" +
+          `|  |- Total failed:\t${totalFailed}\n` +
+          "|  `- Journal matches:\t_SYSTEMD_UNIT=sshd.service + _COMM=sshd\n" +
           "`- Actions\n" +
-          "   |- Running: 0\n" +
-          `   \`- Ban total: ${banned}\n`,
+          `   |- Currently banned:\t${banned}\n` +
+          `   |- Total banned:\t${totalBanned}\n` +
+          "   `- Banned IP list:\t\n",
       );
     }
 

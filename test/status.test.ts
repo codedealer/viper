@@ -10,9 +10,13 @@ import {
   statsApiFromRendered,
   certDaysLeft,
   CERT_WARN_DAYS,
+  PROBE_CONCURRENCY,
+  PROBE_CHANNEL_GAP_MS,
+  errorLogProbeCmd,
   type StatusData,
 } from "../src/status.js";
 import type { SshConn } from "../src/ssh.js";
+import { XRAY_BIN } from "../src/steps/xray-install.js";
 import { StatusTui } from "../src/status-tui.js";
 import { FakeRemote } from "./fake-remote.js";
 import { fixtureConfig, fixtureState } from "./fixtures.js";
@@ -96,7 +100,7 @@ test("collectStatus: full snapshot with checks (M7 D7)", async () => {
   assert.deepEqual(data.warnings.xrayLog, { state: "ok", total: 0, recent: [] });
   assert.deepEqual(data.warnings.nginxLog, { state: "ok", total: 0, recent: [] });
   assert.deepEqual(data.warnings.failedUnits, { state: "ok", units: [] });
-  assert.deepEqual(data.warnings.fail2ban, { state: "ok", banned: 0, totalFailed: 0 });
+  assert.deepEqual(data.warnings.fail2ban, { state: "ok", banned: 0, totalFailed: 0, totalBanned: 0 });
   assert.equal(data.warnings.cert.state, "ok");
   assert.ok(
     (data.warnings.cert.daysLeft ?? 0) >= CERT_WARN_DAYS,
@@ -246,7 +250,7 @@ function fakeStatusData(): StatusData {
       xrayLog: { state: "ok", total: 0, recent: [] },
       nginxLog: { state: "ok", total: 0, recent: [] },
       failedUnits: { state: "ok", units: [] },
-      fail2ban: { state: "ok", banned: 0, totalFailed: 0 },
+      fail2ban: { state: "ok", banned: 0, totalFailed: 0, totalBanned: 0 },
       cert: { state: "ok", daysLeft: 30 },
       disk: { state: "ok", percent: 12 },
     },
@@ -315,6 +319,7 @@ test("collectStatus: warnings surface warning states per signal", async () => {
     failedUnits: [unitLine],
     fail2banBanned: 3,
     fail2banTotalFailed: 41,
+    fail2banTotalBanned: 5,
     certNotAfter: opensslDate(Date.now() + 10 * 86_400_000),
     diskTotalMb: 10_000,
     diskUsedMb: 9_000,
@@ -329,7 +334,7 @@ test("collectStatus: warnings surface warning states per signal", async () => {
   assert.deepEqual(data.warnings.xrayLog.recent, xrayErrors.slice(-5));
   assert.deepEqual(data.warnings.nginxLog, { state: "warn", total: 2, recent: nginxErrors });
   assert.deepEqual(data.warnings.failedUnits, { state: "warn", units: [unitLine] });
-  assert.deepEqual(data.warnings.fail2ban, { state: "warn", banned: 3, totalFailed: 41 });
+  assert.deepEqual(data.warnings.fail2ban, { state: "warn", banned: 3, totalFailed: 41, totalBanned: 5 });
   assert.deepEqual(data.warnings.cert, { state: "warn", daysLeft: 10 });
   assert.deepEqual(data.warnings.disk, { state: "warn", percent: 90 });
   assert.equal(data.disk, "9000 MB / 10000 MB");
@@ -429,7 +434,7 @@ test("renderStatusSnapshot: warnings section (populated, golden)", () => {
     xrayLog: { state: "warn", total: 7, recent: xrayErrors },
     nginxLog: { state: "warn", total: 1, recent: ["2026/09/01 02:00:01 [emerg] 123#123: bind() failed"] },
     failedUnits: { state: "warn", units: ["xray.service   loaded failed failed   VLESS/REALITY proxy"] },
-    fail2ban: { state: "warn", banned: 3, totalFailed: 41 },
+    fail2ban: { state: "warn", banned: 3, totalFailed: 41, totalBanned: 5 },
     cert: { state: "warn", daysLeft: 10 },
     disk: { state: "warn", percent: 90 },
   };
@@ -443,7 +448,7 @@ test("renderStatusSnapshot: warnings section (populated, golden)", () => {
     "           2026/09/01 02:00:01 [emerg] 123#123: bind() failed",
     "units:     1 failed",
     "           xray.service   loaded failed failed   VLESS/REALITY proxy",
-    "fail2ban:  3 banned (total failed: 41)",
+    "fail2ban:  3 banned (41 failed, 5 lifetime)",
     "cert:      10 days left",
     "disk:      90% used",
     // section order: Warnings sits between Clients and Checks
@@ -454,13 +459,133 @@ test("renderStatusSnapshot: warnings section (populated, golden)", () => {
   }
 });
 
+test("collectStatus: fail2ban parses the 1.0.2 and legacy per-jail shapes", async () => {
+  // fail2ban 1.0.2 (the live nova box): "Currently banned" is the active
+  // count, labels are tab-separated, "Total banned" is lifetime context.
+  const live = await collectStatus(
+    healthyRemote({ fail2banBanned: 2, fail2banTotalFailed: 44, fail2banTotalBanned: 5 }),
+    fixtureConfig,
+    fixtureState,
+    { runChecks: true, poll: POLL_FAST },
+  );
+  assert.deepEqual(live.warnings.fail2ban, { state: "warn", banned: 2, totalFailed: 44, totalBanned: 5 });
+
+  // Legacy per-jail shape: "Ban total" fallback; "Total banned" absent → null.
+  const legacy = await collectStatus(
+    healthyRemote({ fail2banFormat: "legacy", fail2banBanned: 2, fail2banTotalFailed: 44 }),
+    fixtureConfig,
+    fixtureState,
+    { runChecks: true, poll: POLL_FAST },
+  );
+  assert.deepEqual(legacy.warnings.fail2ban, {
+    state: "warn",
+    banned: 2,
+    totalFailed: 44,
+    totalBanned: null,
+  });
+});
+
+test("collectStatus: probe fan-out stays under the sshd MaxSessions cap", async () => {
+  // Live nova finding (2026-09-06): the uncapped 16-concurrent refresh wave
+  // exceeded sshd's MaxSessions (10) — channel opens failed and multiple
+  // signals degraded to unknown. The pool must cap overlap at PROBE_CONCURRENCY.
+  const base = healthyRemote();
+  let inflight = 0;
+  let maxInflight = 0;
+  const conn: SshConn = {
+    run: async (cmd, opts) => {
+      inflight += 1;
+      maxInflight = Math.max(maxInflight, inflight);
+      const r = await base.run(cmd, opts);
+      // Hold the channel open long enough for the pool to fill.
+      await new Promise((res) => setTimeout(res, 5));
+      inflight -= 1;
+      return r;
+    },
+    upload: (l, p) => base.upload(l, p),
+    close: () => base.close(),
+    hostKeyFingerprint: () => base.hostKeyFingerprint(),
+  };
+  const started = Date.now();
+  const data = await collectStatus(conn, fixtureConfig, fixtureState, { runChecks: false });
+  const elapsed = Date.now() - started;
+  assert.ok(
+    maxInflight <= PROBE_CONCURRENCY,
+    `max concurrent probes ${maxInflight} exceeds the cap ${PROBE_CONCURRENCY} (sshd MaxSessions 10 rejected the uncapped 16-concurrent fan-out)`,
+  );
+  assert.ok(maxInflight >= 4, `fan-out should still be parallel (observed max overlap ${maxInflight})`);
+  // 14 jobs over 8 workers guarantees at least one worker boundary — the
+  // pool must apply the inter-wave channel gap (sshd MaxSessions teardown
+  // lag; live nova finding 2026-09-06).
+  assert.ok(
+    elapsed >= PROBE_CHANNEL_GAP_MS - 10,
+    `pool completed in ${elapsed}ms — the ${PROBE_CHANNEL_GAP_MS}ms channel gap is not applied`,
+  );
+  // The pool dropped nothing: every signal still probed and resolved.
+  assert.equal(data.cpu, "5.0% used");
+  assert.equal(data.ram, "1234 MB / 7828 MB");
+  assert.equal(data.ipv6, "enabled (global v6 on eth0)");
+  assert.equal(data.warnings.xrayLog.state, "ok");
+  assert.equal(data.warnings.nginxLog.state, "ok");
+  assert.equal(data.warnings.failedUnits.state, "ok");
+  assert.equal(data.warnings.disk.state, "ok");
+});
+
+test("collectStatus: refresh path issues exactly the 14 pooled probes (golden)", async () => {
+  const base = healthyRemote();
+  const cmds: string[] = [];
+  const conn: SshConn = {
+    run: async (cmd, opts) => {
+      cmds.push(cmd);
+      return base.run(cmd, opts);
+    },
+    upload: (l, p) => base.upload(l, p),
+    close: () => base.close(),
+    hostKeyFingerprint: () => base.hostKeyFingerprint(),
+  };
+  const data = await collectStatus(conn, fixtureConfig, fixtureState, { runChecks: false });
+
+  const expected = [
+    `${XRAY_BIN} version`,
+    "systemctl is-active xray",
+    "systemctl show xray -p ActiveEnterTimestamp --value",
+    "uptime -p",
+    "LC_ALL=C top -bn1",
+    "free -m",
+    "df -m /",
+    `${XRAY_BIN} api statsquery --server=${statsApiFromRendered(fixtureConfig, fixtureState)}`,
+    "stat -c %y /var/www/viper/main/sub.txt 2>/dev/null",
+    "sysctl -n net.ipv6.conf.all.disable_ipv6 net.ipv6.conf.default.disable_ipv6",
+    "ip -6 addr show scope global",
+    errorLogProbeCmd("/var/log/xray/error.log"),
+    errorLogProbeCmd("/var/log/nginx/error.log"),
+    "systemctl --failed --no-legend",
+  ];
+  assert.deepEqual(cmds.sort(), expected.sort(), "the refresh wave is exactly the 14-probe set");
+
+  // Golden refresh snapshot: refresh-path signals probed, checks-path not yet.
+  const out = renderStatusSnapshot(data);
+  for (const line of [
+    "xray:      ok",
+    "nginx:     ok",
+    "units:     ok",
+    "fail2ban:  unknown (not run yet)",
+    "cert:      unknown (not run yet)",
+    "disk:      13% used",
+    "handshake: not run yet (r to run)",
+    "ipv6:      enabled (global v6 on eth0)",
+  ]) {
+    assert.ok(out.includes(line), `refresh snapshot missing: ${line}\n${out}`);
+  }
+});
+
 test("renderStatusSnapshot: unknown warning lines stay calm and stable", () => {
   const d = fakeStatusData();
   d.warnings = {
     xrayLog: { state: "unknown", total: null, recent: [] },
     nginxLog: { state: "ok", total: 0, recent: [] },
     failedUnits: { state: "ok", units: [] },
-    fail2ban: { state: "unknown", banned: null, totalFailed: null },
+    fail2ban: { state: "unknown", banned: null, totalFailed: null, totalBanned: null },
     cert: { state: "unknown", daysLeft: null },
     disk: { state: "ok", percent: 12 },
   };
