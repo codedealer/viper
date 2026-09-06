@@ -65,6 +65,16 @@ test("no framework, build or generation fingerprints", () => {
   assert.ok(!/<!--/.test(markup), "no HTML comments");
 });
 
+test("layout: full-screen hero background, form card centered above it", () => {
+  const html = renderPage(heroBase64);
+  assert.match(html, /object-fit:cover/, "hero covers the viewport");
+  assert.match(html, /100vh/, "full-screen background height");
+  assert.match(html, /display:flex/, "card container is flex");
+  assert.match(html, /align-items:center/, "card centered vertically");
+  assert.match(html, /justify-content:center/, "card centered horizontally");
+  assert.match(html, /footer\{position:fixed/, "footer anchored to the viewport bottom");
+});
+
 test("stable page marker is present in the rendered page", () => {
   const html = renderPage(heroBase64);
   assert.ok(PAGE_MARKER.length > 0, "marker constant must be non-empty");
