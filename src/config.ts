@@ -283,7 +283,7 @@ const HAPP_DOMAIN_STRATEGIES = new Set(["IPIfNonMatch", "AsIs"]);
  * builder's generated profile JSON and its import normalizer
  * (`RouteOrder ?? "block-proxy-direct"`). Case-sensitive, no normalization.
  */
-const HAPP_ROUTE_ORDERS = new Set([
+export const HAPP_ROUTE_ORDERS = new Set([
   "block-proxy-direct",
   "block-direct-proxy",
   "proxy-direct-block",

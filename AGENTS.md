@@ -9,6 +9,14 @@ Provide easy way to store and manage configuration generator, that allows to dep
 ## Additional documentation
 
 Context-specific source material can be found in `refs/`
+## Commands & conventions
+
+- Checks: `pnpm lint` (biome, `src/` + `test/`), `pnpm typecheck`, `pnpm test`.
+- Single test file: `node --import tsx --test test/<name>.test.ts` (plain `node --test` does not work — tests are TS).
+- Test summary: `pnpm test 2>&1 | grep '^ℹ'` (the `tests`/`pass`/`fail` lines).
+- `viper.*.yml` are live per-server configs, gitignored by design — their absence from `git status` is intentional.
+- Known failing tests (do not re-verify as regressions): `test/status.test.ts` — fixture cert (Sep 30 2026) expired, snapshot `warn` ≠ `ok`; refresh the fixture to fix. `test/check.test.ts` — blackhole-IP probe is host-network dependent.
+- Pre-commit guardrail lives in `hooks/pre-commit` (enabled via `git config core.hooksPath hooks`); CI mirrors it in `.github/workflows/ci.yml`.
 
 ## Operating rules
 

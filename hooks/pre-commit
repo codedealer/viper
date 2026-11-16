@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+# Viper pre-commit guardrail: fast checks only (lint + typecheck).
+# Enable (per clone): git config core.hooksPath hooks
+set -e
+pnpm lint
+pnpm typecheck
