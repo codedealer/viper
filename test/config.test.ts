@@ -126,6 +126,7 @@ test("routing: full override block parses (lists, string maps, enums)", () => {
       ProxySites: [],
       ProxyIp: [],
       DomainStrategy: "AsIs",
+      RouteOrder: "block-proxy-direct",
       FakeDNS: false,
     },
   });
@@ -145,6 +146,7 @@ test("routing: full override block parses (lists, string maps, enums)", () => {
       ProxySites: [],
       ProxyIp: [],
       DomainStrategy: "AsIs",
+      RouteOrder: "block-proxy-direct",
       FakeDNS: false,
     },
   });
@@ -165,6 +167,11 @@ test("routing: validation failures are actionable ConfigErrors", () => {
   // bad enums
   expectConfigError(
     { ...validDoc, routing: { name: "a", DomainStrategy: "nope" } },
+    "main",
+    "expected one of",
+  );
+  expectConfigError(
+    { ...validDoc, routing: { name: "a", RouteOrder: "direct-direct-proxy" } },
     "main",
     "expected one of",
   );

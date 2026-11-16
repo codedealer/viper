@@ -120,10 +120,10 @@ validator stay in sync.
 | `bbr` | bool | `true` | Gates the BBR congestion-control step. |
 | `allowIPv6` | bool | `false` | M8 network posture: the server is IPv4-only by default — the deploy's `Configure IPv6` step disables kernel IPv6 (persisted to `/etc/sysctl.d/99-viper-ipv6.conf`) so there is no v6 egress or inbound listener. `true` never disables, and re-enables if a previous deploy disabled it (detached interface bounce + poll; a missing v6 address is non-fatal — reboot completes it). Deploy-only knob: changing it on a live box means re-running `deploy` (idempotent); `viper status` shows the actual state. |
 | `clients` | list | `[{ name: default }]` | One entry per user: `name` (unique; used as the stat label + subscription tag) and `limitIp` (0–65535, default `0` = unlimited concurrent IPs). Each client gets a UUID in `state/<name>.yml`. |
-| `routing` | block | absent | **Opt-in Happ routing profile.** Presence = ship a `happ://routing/onadd/{base64}` line in `sub.txt` (and the deploy/sub tail); absence = no routing line. `name` is required; all other keys are Happ's documented profile field names, validated against that set, and merged over Happ's documented default profile (unset fields keep the defaults). Rule priority is Happ's: block → direct → proxy. |
+| `routing` | block | absent | **Opt-in Happ routing profile.** Presence = ship a `happ://routing/onadd/{base64}` line in `sub.txt` (and the deploy/sub tail); absence = no routing line. `name` is required; all other keys are Happ's profile field names (the documented set plus builder-sourced `RouteOrder`), validated against that set, and merged over Happ's documented default profile (unset fields keep the defaults). Rule order is pinned by viper: `RouteOrder` — default `block-direct-proxy` (block → direct → proxy); the six accepted values are listed in the example below. |
 
-`routing` block (all profile fields optional — unset fields fall back to
-Happ's documented defaults):
+`routing` block (all profile fields optional — unset fields fall back to the pinned
+defaults: Happ's documented defaults, plus `RouteOrder` pinned to `block-direct-proxy`):
 
 ```yaml
 routing:            # absent → no routing line in sub.txt
@@ -140,7 +140,11 @@ routing:            # absent → no routing line in sub.txt
   Geositeurl: https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat
   DomainStrategy: IPIfNonMatch  # IPIfNonMatch | AsIs
   FakeDNS: false                # bool
-  # rule stack — block → direct → proxy (strings or string maps, no syntax validation)
+  RouteOrder: block-direct-proxy  # rule order (Happ's routing builder); viper pins the
+                                  # app default: block → direct → proxy. Also accepted:
+                                  # block-proxy-direct, proxy-direct-block,
+                                  # proxy-block-direct, direct-proxy-block, direct-block-proxy
+  # rule stack (evaluated per `RouteOrder`; strings or string maps, no syntax validation)
   BlockSites: ["geosite:ads"]
   BlockIp: ["geoip:ads"]
   DirectSites: ["geosite:geolocation-cn"]

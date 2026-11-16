@@ -42,6 +42,11 @@ function defaultProfile(): Record<string, unknown> {
       "255.255.255.255",
     ],
     DomainStrategy: "IPIfNonMatch",
+    // Rule order the current Happ client applies when the field is absent
+    // (observed in the client UI). Shipped explicitly so the rendered
+    // profile stays declarative and insures against a future change of the
+    // client's built-in default.
+    RouteOrder: "block-direct-proxy",
     FakeDNS: "false",
   };
 }

@@ -30,6 +30,7 @@ const DEFAULT_PROFILE = {
     "255.255.255.255",
   ],
   DomainStrategy: "IPIfNonMatch",
+  RouteOrder: "block-direct-proxy",
   FakeDNS: "false",
 };
 
@@ -48,6 +49,7 @@ test("user overrides merge over the defaults (missing fields stay default)", () 
       DomesticDNSDomain: "",
       DirectSites: ["geosite:geolocation-cn"],
       DirectIp: ["geoip:cn"],
+      RouteOrder: "block-proxy-direct",
       BlockSites: ["geosite:ads"],
       BlockIp: ["geoip:ads"],
     },
@@ -66,6 +68,7 @@ test("user overrides merge over the defaults (missing fields stay default)", () 
   assert.equal(p.RemoteDNSType, "DoH");
   assert.equal(p.RemoteDNSDomain, "https://cloudflare-dns.com/dns-query");
   assert.equal(p.DomainStrategy, "IPIfNonMatch");
+  assert.equal(p.RouteOrder, "block-proxy-direct");
   assert.equal(p.FakeDNS, "false");
   assert.deepEqual(p.DnsHosts, DEFAULT_PROFILE.DnsHosts);
   // no extra fields appear (no ProxySites/ProxyIp when the user didn't set them)
@@ -82,7 +85,7 @@ test('yml booleans are normalized to Happ\'s string "true"/"false" at render tim
 test("config-driven line carries the name and decodes to the merged profile", () => {
   const routing: RoutingConfig = {
     name: "Viper",
-    profile: { BlockSites: ["geosite:ads"], FakeDNS: true },
+    profile: { BlockSites: ["geosite:ads"], FakeDNS: true, RouteOrder: "block-proxy-direct" },
   };
   const line = renderRoutingLine(routing);
   assert.ok(line.startsWith(PREFIX));
@@ -93,6 +96,7 @@ test("config-driven line carries the name and decodes to the merged profile", ()
   assert.equal(profile.Name, "Viper");
   assert.deepEqual(profile.BlockSites, ["geosite:ads"]);
   assert.equal(profile.FakeDNS, "true");
+  assert.equal(profile.RouteOrder, "block-proxy-direct");
   // deterministic
   assert.equal(line, renderRoutingLine(routing));
 });

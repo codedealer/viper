@@ -42,6 +42,7 @@ export interface RoutingProfile {
   BlockSites?: RoutingRule[];
   BlockIp?: RoutingRule[];
   DomainStrategy?: string;
+  RouteOrder?: string;
   FakeDNS?: boolean;
 }
 
@@ -275,10 +276,27 @@ function dnsHostsField(
 
 const HAPP_DNS_TYPES = new Set(["DoH", "DoU"]);
 const HAPP_DOMAIN_STRATEGIES = new Set(["IPIfNonMatch", "AsIs"]);
+/**
+ * Rule-order values exactly as emitted by Happ's official routing builder
+ * (routing.happ.su — the tool routing.md points to for creating these
+ * links). `RouteOrder` is NOT documented in the gitbook: confirmed from the
+ * builder's generated profile JSON and its import normalizer
+ * (`RouteOrder ?? "block-proxy-direct"`). Case-sensitive, no normalization.
+ */
+const HAPP_ROUTE_ORDERS = new Set([
+  "block-proxy-direct",
+  "block-direct-proxy",
+  "proxy-direct-block",
+  "proxy-block-direct",
+  "direct-proxy-block",
+  "direct-block-proxy",
+]);
 
 /**
  * Documented Happ profile field names (refs/happ_su/dev-docs/routing.md —
- * the same set pinned in test/render-routing.test.ts), minus `Name`: the
+ * the same set pinned in test/render-routing.test.ts), plus `RouteOrder`
+ * (sourced from the official routing builder — routing.md does not
+ * document it), minus `Name`: the
  * profile name is supplied viper-side via `name` and rendered as `Name`.
  */
 const ROUTING_PROFILE_KEYS = new Set([
@@ -300,6 +318,7 @@ const ROUTING_PROFILE_KEYS = new Set([
   "BlockSites",
   "BlockIp",
   "DomainStrategy",
+  "RouteOrder",
   "FakeDNS",
 ]);
 
@@ -334,6 +353,7 @@ function parseRouting(value: unknown, path: string): RoutingConfig {
   set("BlockSites", ruleListField(d, "BlockSites", path));
   set("BlockIp", ruleListField(d, "BlockIp", path));
   set("DomainStrategy", optionalEnumField(d, "DomainStrategy", path, HAPP_DOMAIN_STRATEGIES));
+  set("RouteOrder", optionalEnumField(d, "RouteOrder", path, HAPP_ROUTE_ORDERS));
   set("FakeDNS", optionalBoolField(d, "FakeDNS", path));
   return { name, profile };
 }
