@@ -151,6 +151,14 @@ async function downloadAndVerify(conn: SshConn, version: string): Promise<void> 
 }
 
 async function extractAndInstall(conn: SshConn): Promise<void> {
+  // A running xray holds the binary open — cp over it fails with
+  // "Text file busy". Stop it if active; the deploy step restarts it
+  // (fresh installs have nothing running, so this is a no-op there).
+  const active = await conn.run("systemctl is-active xray 2>/dev/null", { timeoutMs: 10_000 });
+  if (active.stdout.trim() === "active") {
+    await conn.run("systemctl stop xray", { timeoutMs: 30_000 });
+  }
+
   const unzip = await conn.run(`cd ${DOWNLOAD_DIR} && unzip -o ${XRAY_ZIP}`, {
     timeoutMs: 120_000,
   });

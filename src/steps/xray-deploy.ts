@@ -37,7 +37,26 @@ export function xrayDeployStep(pollOpts: PollOptions = {}): Step {
         timeoutMs: 15_000,
       });
       if (current.stdout === rendered) {
-        return { status: "ok", detail: "config unchanged" };
+        // Config unchanged, but the unit may be stopped — the install
+        // step stops xray to replace a busy binary and relies on this
+        // step to leave the unit active.
+        const active = (await conn.run("systemctl is-active xray", { timeoutMs: 10_000 })).stdout.trim();
+        if (active === "active") {
+          return { status: "ok", detail: "config unchanged" };
+        }
+        const start = await conn.run("systemctl start xray", { timeoutMs: 30_000 });
+        if (start.code !== 0) {
+          return { status: "failed", detail: `systemctl start xray failed: ${errDetail(start.stderr)}` };
+        }
+        const up = await poll(
+          async () =>
+            (await conn.run("systemctl is-active xray", { timeoutMs: 10_000 })).stdout.trim() === "active",
+          pollOpts,
+        );
+        if (!up) {
+          return { status: "failed", detail: "xray did not become active after start" };
+        }
+        return { status: "changed", detail: "config unchanged, started stopped xray" };
       }
 
       await conn.run(`mkdir -p ${XRAY_LOG_DIR}`, { timeoutMs: 10_000 });

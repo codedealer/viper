@@ -45,13 +45,32 @@ test("deploy: fresh — tmp → -test → mv → restart → active", async () =
 });
 
 test("deploy: config unchanged — ok, zero mutating calls", async () => {
-  const remote = new FakeRemote({ xrayInstalled: true, xrayConfigFile: rendered() });
+  const remote = new FakeRemote({
+    xrayInstalled: true,
+    xrayUnitFile: renderXrayUnit(),
+    xrayConfigFile: rendered(),
+    xrayActive: true,
+  });
   const res = await xrayDeployStep(FAST).run(remote, ctx());
   assert.equal(res.status, "ok");
   assert.match(res.detail ?? "", /config unchanged/);
   assert.equal(remote.mutatingCommands().length, 0);
   assert.equal(remote.uploads.length, 0);
   assert.ok(!remote.commands.includes("systemctl restart xray"));
+});
+
+test("deploy: config unchanged but unit stopped — starts it", async () => {
+  const remote = new FakeRemote({
+    xrayInstalled: true,
+    xrayUnitFile: renderXrayUnit(),
+    xrayConfigFile: rendered(),
+  });
+  const res = await xrayDeployStep(FAST).run(remote, ctx());
+  assert.equal(res.status, "changed");
+  assert.match(res.detail ?? "", /started stopped xray/);
+  assert.ok(remote.commands.includes("systemctl start xray"));
+  assert.ok(!remote.commands.includes("systemctl restart xray"));
+  assert.equal(remote.uploads.length, 0);
 });
 
 test("deploy: -test rejects new config — live config untouched, tmp removed", async () => {

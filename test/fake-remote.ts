@@ -92,6 +92,8 @@ export interface FakeRemoteOptions {
   xrayTestClientFails?: string;
   /** `systemctl restart xray` fails (unit exists but job fails). */
   xrayRestartFails?: boolean;
+  /** `systemctl start xray` fails (unit exists but job fails). */
+  xrayStartFails?: boolean;
   /** xray unit active (default false; set by restart). */
   xrayActive?: boolean;
   /** Ports shown by `ss -tln` (default none). */
@@ -820,6 +822,15 @@ export class FakeRemote implements SshConn {
       this.xrayActive = !this.opts.xrayStaysInactive;
       return ok();
     }
+    if (cmd === "systemctl start xray") {
+      if (!this.files.has("/etc/systemd/system/xray.service")) {
+        return fail(3, "Unit xray.service not found.");
+      }
+      if (this.opts.xrayStartFails)
+        return fail(1, "Job for xray.service failed because the control process exited with error code.");
+      this.xrayActive = !this.opts.xrayStaysInactive;
+      return ok();
+    }
     if (cmd === "systemctl is-active xray") {
       return this.xrayActive ? ok("active\n") : fail(3, "inactive\n");
     }
@@ -1297,6 +1308,7 @@ export class FakeRemote implements SshConn {
       c.startsWith("cp /tmp/viper-xray/") ||
       c === "systemctl enable xray" ||
       c === "systemctl restart xray" ||
+      c === "systemctl start xray" ||
       c.startsWith("systemctl disable --now xray") ||
       c === "systemctl daemon-reload" ||
       c === "mv /etc/xray/config.new.json /etc/xray/config.json" ||
